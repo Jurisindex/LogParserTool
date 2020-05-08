@@ -8,7 +8,7 @@ import java.net.URL;
 
 public class RestClient
 {
-	private static Logger logger = Logger.getInstance(Logger.LogLevel.DEBUG);
+	private static Logger logger = Logger.getInstance(Logger.LogLevel.WARNING);
 
 	public HttpResponse get(String url, String urlParams, String userAgent)
 	{

@@ -18,7 +18,6 @@ public class ApplicationRoot
 
     public static void main(String[] args)
     {
-
         //Get the current DateTime and day.
         LocalDateTime dateTimeNow = LocalDateTime.now();
         Long epochTimeNow = dateTimeNow.toEpochSecond(ZoneOffset.UTC) * 1000;   //Need in milliseconds.
@@ -26,7 +25,7 @@ public class ApplicationRoot
 
         //Set the lookbackPeriod to 8 weeks from this week's Monday.
         //We raid on Tues/Wed, if we run this report on Monday, or Pre-raid Tuesday,
-        //The Agreement is that we only get 7 weeks data.
+        //The Agreement is that we only get 8 weeks data.
         LocalDateTime lookbackPeriod = getLocalDateTimeWeeksOnDayAgo(8, DayOfWeek.MONDAY, dateTimeNow);
         Long epochTimeLookbackPeriod = lookbackPeriod.toEpochSecond(ZoneOffset.UTC) * 1000; //Need in milliseconds.
 
@@ -37,9 +36,12 @@ public class ApplicationRoot
 
         //Get all reports within a timeframe
         JSONArray reportsInTimeframe = wlogsApi.getReportsByGuild(myGuild, epochTimeNow, epochTimeLookbackPeriod);
+        String oldestRaidLookedUpTitle = ((JSONObject) reportsInTimeframe.get(reportsInTimeframe.length()-1)).getString("title");
+        logger.info("The oldest raid we're looking up is one titled: " +oldestRaidLookedUpTitle);
         List<String> relevantReportIDs = new ArrayList<>();
 
         //Get all reports that are Raid1 Relevant.
+        Integer amountZGs = 0;
         for(int i=0; i < reportsInTimeframe.length(); i++)
         {
             JSONObject jsonObj  = reportsInTimeframe.getJSONObject(i);
@@ -47,9 +49,14 @@ public class ApplicationRoot
             if(title.contains("Raid1") || title.contains("R1") || title.contains("Raid 1"))
             {
                 relevantReportIDs.add(jsonObj.getString("id"));
+                if(title.contains("ZG"))
+                {
+                    amountZGs++;
+                }
             }
         }
-        Integer totalRaids = relevantReportIDs.size();
+        //This is liable to fuck up should we ever do 1 ZG only in a night.
+        Integer totalRaids = relevantReportIDs.size() - (amountZGs/2);
 
         //For each report that's Raid1 relevant, get the list of raiders in that report.
         List<JSONArray> raidAttendences = new ArrayList<>();
@@ -71,8 +78,8 @@ public class ApplicationRoot
                 raiderAttendanceCount = addOrUpdate(raiderAttendanceCount, name);
             }
         }
+        Map<String, Integer> sortedRaiderAttendanceCount = new TreeMap<>(raiderAttendanceCount);
 
-        System.out.println("hello");
     }
 
     private static Map<String, Integer> addOrUpdate(Map<String, Integer> raiderAttendanceCount, String name)
