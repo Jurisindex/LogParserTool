@@ -19,7 +19,7 @@ public class ApplicationRoot
     public static void main(String[] args)
     {
 
-	    //Get the current DateTime and day.
+        //Get the current DateTime and day.
         LocalDateTime dateTimeNow = LocalDateTime.now();
         Long epochTimeNow = dateTimeNow.toEpochSecond(ZoneOffset.UTC) * 1000;   //Need in milliseconds.
         DayOfWeek dayOfWeekNow = dateTimeNow.getDayOfWeek();
