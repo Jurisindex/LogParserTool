@@ -71,45 +71,6 @@ public class ApplicationRoot
                 raiderAttendanceCount = addOrUpdate(raiderAttendanceCount, name);
             }
         }
-        //faq:
-        /*
-            How Hardcore is Raid 1?
-            -We're riding a line between casual and semi-hardcore, leaning a little bit to the semi-hardcore.
-            -We'll make you a bench slot if you're significantly underperforming (think under the tank in damage most the time), but we'll work with you to improve the whole way.
-            -We like to parse for fun, but we're not here to expect everyone to get 99's on every fight. We try and do our best during Parse Week (and every week), but we will not replace a long-time core raider parsing an 80s with an application parsing 90s for example.
-
-            Parse Week?
-            -Till Phase 5 (and again after we have C'thun on farm), we have every Darkmoon Faire week be "Parse Week". We all get buffing and consuming harder than usual, and we log out between bosses for big cooldowns (not Recklessness).
-            -We usually do BWL + MC Tuesday. On Parse week we do BWL Tuesday and MC Wednesday, getting world buffs again for the 2nd day.
-
-            I don't like something that I'm seeing, how do I give feedback on that?
-            -Whether it's an atmosphere you don't like, or mechanics you think we're doing sub-optimally, we'd love to hear it.
-            -Open communication has been one of our big asks of raiders, and it's a very important one. At the end of the day, we want everyone to be happy raiding and playing with us.
-            -We don't want you to bottle up your frustration out of fear, complacency, or not feeling you'll be listened to. You absolutely will. Some of our raiders have given us a list of feedback at once, and we loved it. Others let it bottle up and already decided they're done before they even give a single point. We're all here to improve every week, in any aspects that are needed.
-
-            So I'm a Social that wants to become a raider. How do I go about doing that?
-            -Applying to the raid, trialing for a raid, and going from there. In-guild applications and transfers absolutely welcome. If you feel you're not competent enough, worry not, we'll work with you to help you improve as much as possible.
-
-            Your Loot Council isn't corrupt, is it?
-            -Jurisnoctis is a GM Rogue that got the 3rd CTS, not the 1st 8/8 T2 rush, and still doesn't have a Striker's Mark and probably won't get the next one.
-            -Nargarzhvog is an officer who did not get the first crossbow.
-            -We have a healer loot distribution list that tries to get everyone 1 big ticket item allocated to them in priority order (drops not being crap notwithstanding), to try to equally distribute healer gear.
-            -Same thing for magic casters (currently working on nice looking sheet, but the data/information is there).
-            -We try to pre-decide some big items before hand. This saves time and comes as a better decision than what we would have had rushing and excited after its dropping. Sometimes the decisions get stale (think we decide 5 weeks ago, but that person has been absent twice, or his performance has severely tanked), and we'll need to update.
-            -We want to have everyone feeling satisfied that we make reasonable decisions. Sometimes no healer gear drops for 3 weeks and it's extremely disheartening. Rest assured that we try to have NO character geared to the teeth in true BiS unless we're swimming in drops.
-
-            How can I move up this said list from 4th in line for <Big Item> to say, 2nd or even 1st?
-            -Bring it up. Tell us your intent. Tell us what item you want, and then we'll talk about steps to get there.
-            -Every case will be different, but it'll generally involve more visible effort.
-
-            I see more than 40 people signed up. How do you bench people?
-            -First off, if you don't sign up, I assume you're not coming. Even if you've been here the past 8 weeks on time. Your spot WILL be replaced if you don't sign up, as we'll have the expectation that it's empty.
-            -Second, what we might need for the night. If we're down healers we're going to bench DPS. If it's a Parse Week, we might bench newer recruits/players to ensure it's smooth.
-            -Otherwise, we do our best to communicate benchings Sunday night. That we would have 40+ signed up every time we send the ping, we'd post them immediately.
-            -Ultimately we try to tell people ASAP. If you got benched, double check that your gear is enchanted, you're using consumables, and you've come with world buffs in the past consistently.
-            -If you still are, try to understand that recruitment is the biggest boss of Classic WoW, and keeping 40 people and no more can leave you weeks where you go into BWL with 35.
-
-         */
 
         System.out.println("hello");
     }
