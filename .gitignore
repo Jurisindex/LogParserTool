@@ -11,3 +11,5 @@ out/
 
 # Ignore Gradle build output directory
 build
+
+src/tokens
