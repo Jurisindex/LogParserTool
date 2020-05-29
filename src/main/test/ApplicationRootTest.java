@@ -1,5 +1,3 @@
-package com.loktarogar;
-
 import org.junit.jupiter.api.Test;
 
 class ApplicationRootTest

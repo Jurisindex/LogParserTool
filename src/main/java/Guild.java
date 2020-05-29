@@ -1,5 +1,3 @@
-package com.loktarogar;
-
 public class Guild
 {
 	String guildName;

@@ -1,4 +1,4 @@
-package com.loktarogar.helpers;
+package helpers;
 
 public class Logger
 {

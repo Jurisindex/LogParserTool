@@ -1,7 +1,5 @@
-package com.loktarogar;
-
-import com.loktarogar.helpers.HttpResponse;
-import com.loktarogar.helpers.RestClient;
+import helpers.HttpResponse;
+import helpers.RestClient;
 import org.json.JSONArray;
 import org.json.JSONObject;
 

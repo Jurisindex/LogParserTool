@@ -1,12 +1,12 @@
-package com.loktarogar;
-
-import com.loktarogar.helpers.Logger;
+import helpers.Logger;
+import helpers.SheetsAPI;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.security.GeneralSecurityException;
 import java.time.DayOfWeek;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -30,7 +30,7 @@ public class ApplicationRoot
         Long epochTimeLookbackPeriod = lookbackPeriod.toEpochSecond(ZoneOffset.UTC) * 1000; //Need in milliseconds.
 
         //Get properties, create guild, and set up the WarcraftLogsAPI to properly send and retrieve calls.
-        Properties prop = loadProperties("src/resources/application.properties");
+        Properties prop = loadProperties("src/main/resources/application.properties");
         Guild myGuild = new Guild(prop.getProperty("guildName"), prop.getProperty("serverName"), prop.getProperty("region"));
         WarcraftLogsAPI wlogsApi = new WarcraftLogsAPI(prop.getProperty("apiKey"));
 
@@ -41,7 +41,7 @@ public class ApplicationRoot
         List<String> relevantReportIDs = new ArrayList<>();
 
         //Get all reports that are Raid1 Relevant.
-        Integer amountZGs = 0;
+        Integer amountSplits = 0;
         for(int i=0; i < reportsInTimeframe.length(); i++)
         {
             JSONObject jsonObj  = reportsInTimeframe.getJSONObject(i);
@@ -49,14 +49,14 @@ public class ApplicationRoot
             if(title.contains("Raid1") || title.contains("R1") || title.contains("Raid 1"))
             {
                 relevantReportIDs.add(jsonObj.getString("id"));
-                if(title.contains("ZG"))
+                if(title.contains("G1") || title.contains("G2"))
                 {
-                    amountZGs++;
+                    amountSplits++;
                 }
             }
         }
         //This is liable to fuck up should we ever do 1 ZG only in a night.
-        Integer totalRaids = relevantReportIDs.size() - (amountZGs/2);
+        Integer totalRaids = relevantReportIDs.size() - (amountSplits/2);
 
         //For each report that's Raid1 relevant, get the list of raiders in that report.
         List<JSONArray> raidAttendences = new ArrayList<>();
@@ -79,7 +79,27 @@ public class ApplicationRoot
             }
         }
         Map<String, Integer> sortedRaiderAttendanceCount = new TreeMap<>(raiderAttendanceCount);
+        List<List<String>> cellRepresentations = new ArrayList<>();
 
+        for(Map.Entry<String, Integer> entry : sortedRaiderAttendanceCount.entrySet())
+        {
+            List<String> raiderInfo = new ArrayList<>();
+            raiderInfo.add(entry.getKey());
+            raiderInfo.add(String.valueOf(entry.getValue()));
+            cellRepresentations.add(raiderInfo);
+        }
+        cellRepresentations.add(0, Arrays.asList("Raiders:", "Attendance (out of " + totalRaids + ")"));
+
+        SheetsAPI sheetsAPI = new SheetsAPI();
+        try
+        {
+            sheetsAPI.write2dDataStartingAt(prop.getProperty("spreadsheetId"), cellRepresentations, "A1");
+        }
+        catch (IOException | GeneralSecurityException e)
+        {
+            System.out.println("Error writing to spreadsheet:");
+            e.printStackTrace();
+        }
     }
 
     private static Map<String, Integer> addOrUpdate(Map<String, Integer> raiderAttendanceCount, String name)
