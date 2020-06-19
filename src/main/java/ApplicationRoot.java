@@ -18,27 +18,39 @@ public class ApplicationRoot
 
     public static void main(String[] args)
     {
+        //Load properties from properties file
+        Properties prop = loadProperties("src/main/resources/application.properties");
+
         //Get the current DateTime and day.
         LocalDateTime dateTimeNow = LocalDateTime.now();
         Long epochTimeNow = dateTimeNow.toEpochSecond(ZoneOffset.UTC) * 1000;   //Need in milliseconds.
         DayOfWeek dayOfWeekNow = dateTimeNow.getDayOfWeek();
 
-        //Set the lookbackPeriod to 8 weeks from this week's Monday.
+        //Set the lookbackPeriod to X weeks from this week's Monday.
         //We raid on Tues/Wed, if we run this report on Monday, or Pre-raid Tuesday,
-        //The Agreement is that we only get 8 weeks data.
-        LocalDateTime lookbackPeriod = getLocalDateTimeWeeksOnDayAgo(8, DayOfWeek.MONDAY, dateTimeNow);
+        //The Agreement is that we only get X weeks data.
+        Integer weeksToLookBack = Integer.parseInt(prop.getProperty("weeksLookback"));
+        LocalDateTime lookbackPeriod = getLocalDateTimeWeeksOnDayAgo(weeksToLookBack, DayOfWeek.MONDAY, dateTimeNow);
         Long epochTimeLookbackPeriod = lookbackPeriod.toEpochSecond(ZoneOffset.UTC) * 1000; //Need in milliseconds.
 
-        //Get properties, create guild, and set up the WarcraftLogsAPI to properly send and retrieve calls.
-        Properties prop = loadProperties("src/main/resources/application.properties");
+        //Create guild, and set up the WarcraftLogsAPI to properly send and retrieve calls.
         Guild myGuild = new Guild(prop.getProperty("guildName"), prop.getProperty("serverName"), prop.getProperty("region"));
         WarcraftLogsAPI wlogsApi = new WarcraftLogsAPI(prop.getProperty("apiKey"));
+        List<String> inclusionText = Arrays.asList(prop.getProperty("inclusionText").split(","));
+        List<String> splitIndicator = Arrays.asList(prop.getProperty("splitIndicator").split(","));
 
         //Get all reports within a timeframe
         JSONArray reportsInTimeframe = wlogsApi.getReportsByGuild(myGuild, epochTimeNow, epochTimeLookbackPeriod);
         String oldestRaidLookedUpTitle = ((JSONObject) reportsInTimeframe.get(reportsInTimeframe.length()-1)).getString("title");
         logger.info("The oldest raid we're looking up is one titled: " +oldestRaidLookedUpTitle);
         List<String> relevantReportIDs = new ArrayList<>();
+        Calendar.getInstance().getTime();
+
+        //ONE OFF TEST.
+        JSONObject getCombatantInfoByReportId = wlogsApi.getCombatantInfoByReportId("anXyAgGtLNFZV3kD");
+        JSONObject totalReport = wlogsApi.getReportById("anXyAgGtLNFZV3kD");
+        JSONArray combatInfoArray = getCombatantInfoByReportId.getJSONArray("events");
+
 
         //Get all reports that are Raid1 Relevant.
         Integer amountSplits = 0;
@@ -46,10 +58,10 @@ public class ApplicationRoot
         {
             JSONObject jsonObj  = reportsInTimeframe.getJSONObject(i);
             String title = jsonObj.getString("title");
-            if(title.contains("Raid1") || title.contains("R1") || title.contains("Raid 1"))
+            if(containsOneOfInList(title, inclusionText))
             {
                 relevantReportIDs.add(jsonObj.getString("id"));
-                if(title.contains("G1") || title.contains("G2"))
+                if(containsOneOfInList(title, splitIndicator))
                 {
                     amountSplits++;
                 }
@@ -102,6 +114,18 @@ public class ApplicationRoot
         }
     }
 
+    private static boolean containsOneOfInList(String title, List<String> inclusionText)
+    {
+        for(String s : inclusionText)
+        {
+            if(title.contains(s))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static Map<String, Integer> addOrUpdate(Map<String, Integer> raiderAttendanceCount, String name)
     {
         Integer count = raiderAttendanceCount.get(name);
@@ -139,99 +163,3 @@ public class ApplicationRoot
         return outputTime;
     }
 }
-
-
-/*
-    function fillOutAttendanceMainFunction()
-    {
-      var routeReport = '/report/fights/';
-      var attendanceListCount = getAttendanceForRaids(endpoint, routeReport, apiKey, relevantRaidIds);
-      var attendanceAsPercentage = new Map();
-
-      for (const [key, value] of Object.entries(attendanceListCount))
-      {
-        var percentage = value/relevantRaidIds.length * 100;
-        percentage = Math.floor(percentage * 100) / 100;
-        attendanceAsPercentage[key] = (percentage);
-      }
-
-      fillInExcelForms(attendanceAsPercentage, relevantRaidIds);
-    }
-
-    function fillInExcelForms()
-    {
-      //Intentionally left blank
-    }
-
-    function getAttendanceForRaids(endpoint, routeReport, apiKey, relevantRaidIds)
-    {
-      var attendanceListCount = new Map();
-      for(var i = 0; i < relevantRaidIds.length; i++)
-      {
-        var fullCall = endpoint + routeReport + relevantRaidIds[i] + '?api_key=' + apiKey;
-        var raidData = getRaidData(fullCall);
-
-        var raidersPresent = new Array();
-        var characters = raidData['exportedCharacters'];
-        for(var j = 0; j < characters.length; j++)
-        {
-          raidersPresent.push(characters[j]['name']);
-        }
-
-        for(var j = 0; j < raidersPresent.length; j++)
-        {
-          //check if the raider is in the list
-          var raider = raidersPresent[j];
-          if(attendanceListCount[raider] !== undefined)
-          {
-    //        var attendanceCount = attendanceListCount[raider];
-    //        attendanceCount++;
-    //        attendanceListCount[raider] = attendanceCount;
-            attendanceListCount[raider]++;
-          }
-          else
-          {
-            attendanceListCount[raider] = 1;
-          }
-        }
-      }
-      return attendanceListCount;
-    }
-
-    function getRaidData(fullCall)
-    {
-      var response = UrlFetchApp.fetch(fullCall, {'muteHttpExceptions': true});
-      var jsonText = response.getContentText();
-      var jsonData = JSON.parse(jsonText);
-
-      return jsonData;
-    }
-
-    function getLast2WeeksOfReportIds(jsonData)
-    {
-      var relevantRaidIds = new Array();  //Should be 16 raids in the list.
-
-      for (var i = 0; i < jsonData.length; i++)
-      {
-        var obj = jsonData[i];
-        var title = String(obj['title']);
-        var shouldInclude = title.includes('Raid1');
-        if(shouldInclude)
-        {
-          relevantRaidIds.push(obj['id']);
-        }
-      }
-
-      return relevantRaidIds;
-    }
-
-    function getUploadMetadataJSONFromWarcraftLogs(query, endpoint, route, apiKey)
-    {
-      var call = endpoint + route + query + "&api_key=" + apiKey;
-      var response = UrlFetchApp.fetch(call, {'muteHttpExceptions': true});
-      var jsonText = response.getContentText();
-      var jsonData = JSON.parse(jsonText);
-
-      return getLast2WeeksOfReportIds(jsonData);
-    }
- */

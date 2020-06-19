@@ -10,6 +10,7 @@ public class WarcraftLogsAPI
 	private String baseAPIEndpoint = "https://classic.warcraftlogs.com/v1";
 	private String reportsByGuildRoute = "/reports/guild/";
 	private String reportsByIdRoute = "/report/fights/";
+	private String eventsInReportId = "/report/events/";
 
 	public WarcraftLogsAPI(String apiKey)
 	{
@@ -56,14 +57,20 @@ public class WarcraftLogsAPI
 			return null;
 		}
 	}
-	//
-//	function getUploadMetadataJSONFromWarcraftLogs(query, endpoint, route, apiKey)
-//	{
-//		var call = endpoint + route + query + "&api_key=" + apiKey;
-//		var response = UrlFetchApp.fetch(call, {'muteHttpExceptions': true});
-//		var jsonText = response.getContentText();
-//		var jsonData = JSON.parse(jsonText);
-//
-//		return getLast2WeeksOfReportIds(jsonData);
-//	}
+
+	public JSONObject getCombatantInfoByReportId(String reportId)
+	{
+		String fullUrl = baseAPIEndpoint + eventsInReportId + reportId;
+		String queryParamsString = "?start=0&end=500000000&filter=type=\"combatantinfo\"" + "&api_key="+apiKey;
+		HttpResponse response = restClient.get(fullUrl, queryParamsString, "Jurisnoctis");
+		if(response.is2xx())
+		{
+			JSONObject object = new JSONObject(response.getResponseText());
+			return object;
+		}
+		else
+		{
+			return null;
+		}
+	}
 }
