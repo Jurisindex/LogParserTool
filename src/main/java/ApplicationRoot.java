@@ -7,9 +7,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.GeneralSecurityException;
-import java.time.DayOfWeek;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.*;
 import java.util.*;
 
 public class ApplicationRoot
@@ -42,7 +40,7 @@ public class ApplicationRoot
         //Get all reports within a timeframe
         JSONArray reportsInTimeframe = wlogsApi.getReportsByGuild(myGuild, epochTimeNow, epochTimeLookbackPeriod);
         String oldestRaidLookedUpTitle = ((JSONObject) reportsInTimeframe.get(reportsInTimeframe.length()-1)).getString("title");
-        logger.info("The oldest raid we're looking up is one titled: " +oldestRaidLookedUpTitle);
+        logger.info("The oldest raid we're looking up is one titled: " + oldestRaidLookedUpTitle);
         List<String> relevantReportIDs = new ArrayList<>();
         Calendar.getInstance().getTime();
 
@@ -50,7 +48,6 @@ public class ApplicationRoot
         JSONObject getCombatantInfoByReportId = wlogsApi.getCombatantInfoByReportId("anXyAgGtLNFZV3kD");
         JSONObject totalReport = wlogsApi.getReportById("anXyAgGtLNFZV3kD");
         JSONArray combatInfoArray = getCombatantInfoByReportId.getJSONArray("events");
-
 
         //Get all reports that are Raid1 Relevant.
         Integer amountSplits = 0;
@@ -72,12 +69,19 @@ public class ApplicationRoot
 
         //For each report that's Raid1 relevant, get the list of raiders in that report.
         List<JSONArray> raidAttendences = new ArrayList<>();
+        List<JSONArray> friendlies = new ArrayList<>();
+        List<Long> startTimes = new ArrayList<>();
         for(String s : relevantReportIDs)
         {
             JSONObject output = wlogsApi.getReportById(s);
             JSONArray raiders = output.getJSONArray("exportedCharacters");
+            friendlies.add(output.getJSONArray("friendlies"));
+            startTimes.add(output.getLong("start"));
             raidAttendences.add(raiders);
         }
+
+        LocalDateTime ldt = Instant.ofEpochMilli(123L).atZone(ZoneId.systemDefault()).toLocalDateTime();
+        ldt.getDayOfWeek();
 
         //Separate out each raider and count their appearances.
         Map<String, Integer> raiderAttendanceCount = new HashMap<>();
