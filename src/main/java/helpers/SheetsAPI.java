@@ -27,15 +27,16 @@ import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.client.util.store.FileDataStoreFactory;
 import com.google.api.services.sheets.v4.Sheets;
 import com.google.api.services.sheets.v4.SheetsScopes;
-import com.google.api.services.sheets.v4.model.UpdateValuesResponse;
-import com.google.api.services.sheets.v4.model.ValueRange;
+import com.google.api.services.sheets.v4.model.*;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.security.GeneralSecurityException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 public class SheetsAPI
 {
@@ -43,6 +44,9 @@ public class SheetsAPI
 	private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
 	private static final String TOKENS_DIRECTORY_PATH = "tokens";
 	private static StringHelper stringHelper = StringHelper.getInstance();
+	private NetHttpTransport HTTP_TRANSPORT;
+	private Sheets service;
+
 
 	/**
 	 * Global instance of the scopes required by this quickstart.
@@ -75,29 +79,54 @@ public class SheetsAPI
 		return new AuthorizationCodeInstalledApp(flow, receiver).authorize("user");
 	}
 
-	/**
-	 * Prints the names and majors of students in a sample spreadsheet:
-	 * https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit
-	 */
-	public void write2dDataStartingAt(String spreadsheetId, List<List<String>> data, String startingCell) throws IOException, GeneralSecurityException {
-		// Build a new authorized API client service.
-		String range = stringHelper.getRangeCalculation(data, startingCell);
-		final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
-		Sheets service = new Sheets.Builder(HTTP_TRANSPORT, JSON_FACTORY, getCredentials(HTTP_TRANSPORT))
-				.setApplicationName(APPLICATION_NAME)
-				.build();
-		ValueRange response = service.spreadsheets().values()
-				.get(spreadsheetId, range)
-				.execute();
+	private Sheets getService() throws GeneralSecurityException, IOException
+	{
+		if(HTTP_TRANSPORT == null || service == null)
+		{
+			HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
+			service = new Sheets.Builder(HTTP_TRANSPORT, JSON_FACTORY, getCredentials(HTTP_TRANSPORT))
+					.setApplicationName(APPLICATION_NAME)
+					.build();
+		}
+		return service;
+	}
 
-		List<List<Object>> values = new ArrayList<>(data.size());
-		for(List<String> rows : data)
+	private List<List<Object>> transform2dStringListInto2dObjectList(List<List<String>> input)
+	{
+		List<List<Object>> values = new ArrayList<>(input.size());
+		for(List<String> rows : input)
 		{
 			List<Object> objectRow = new ArrayList<>();
 			objectRow.addAll(rows);
 			values.add(objectRow);
 		}
 
+		return values;
+	}
+
+	public List<List<String>> getRows(String spreadsheetId, String sheetName, String dataRange) throws GeneralSecurityException, IOException
+	{
+		dataRange = sheetName + "!" + dataRange;
+
+		Sheets service = getService();
+
+		Sheets.Spreadsheets.Values.Get request =
+				service.spreadsheets().values().get(spreadsheetId, dataRange);
+		request.setMajorDimension("ROWS");
+
+		ValueRange response = request.execute();
+
+		return (List<List<String>>) response.get("values");
+	}
+
+	public void write2dDataStartingAt(String spreadsheetId, List<List<String>> data, String startingCell, String sheetName) throws IOException, GeneralSecurityException {
+		//Build a new authorized API client service.
+		String range = stringHelper.getRangeCalculation(data, startingCell);
+		range = sheetName + "!" + range;
+		Sheets service = getService();
+
+		//Transform the data input into Objects
+		List<List<Object>> values = transform2dStringListInto2dObjectList(data);
 
 		ValueRange body = new ValueRange()
 				.setValues(values);
@@ -105,22 +134,48 @@ public class SheetsAPI
 				service.spreadsheets().values().update(spreadsheetId, range, body)
 						.setValueInputOption("USER_ENTERED")
 						.execute();
+
 		System.out.printf("%d cells updated.", result.getUpdatedCells());
-
-
-//		List<List<Object>> values = response.getValues();
-//		if (values == null || values.isEmpty()) {
-//			System.out.println("No data found.");
-//		} else {
-//			System.out.println("Name, Major");
-//			for (List row : values) {
-//				// Print columns A and E, which correspond to indices 0 and 4.
-//				System.out.printf("%s, %s\n", row.get(0), row.get(4));
-//			}
-//		}
 	}
 
+	public void append2dData(String spreadsheetId, List<List<String>> data, String sheetName) throws IOException, GeneralSecurityException {
+		//Build a new authorized API client service.
+		String range = sheetName + "!" + "A1";
+		Sheets service = getService();
 
+		//Transform the data input into Objects
+		List<List<Object>> values = transform2dStringListInto2dObjectList(data);
+		AppendCellsRequest appendCellsRequest = new AppendCellsRequest();
+
+		ValueRange body = new ValueRange()
+				.setValues(values);
+		AppendValuesResponse result =
+				service.spreadsheets().values().append(spreadsheetId, range, body)
+						.setValueInputOption("USER_ENTERED")
+						.execute();
+		System.out.println(result.getUpdates().getUpdatedCells() + " cells updated.");
+	}
+
+	public void createSheet(String spreadsheetId, String newSheetName) throws IOException, GeneralSecurityException {
+		//Build a new authorized API client service.
+		Sheets service = getService();
+
+		Request request = new Request();
+		AddSheetRequest addSheetRequest = new AddSheetRequest();
+		SheetProperties addSheetProperties = new SheetProperties();
+		addSheetProperties.set("title", newSheetName);
+		addSheetRequest.setProperties(addSheetProperties);
+		request.setAddSheet(addSheetRequest);
+
+		BatchUpdateSpreadsheetRequest batchUpdate = new BatchUpdateSpreadsheetRequest();
+		List<Request> requests = new ArrayList<>();
+		requests.add(request);
+		batchUpdate.setRequests(requests);
+
+		BatchUpdateSpreadsheetResponse result =
+				service.spreadsheets().batchUpdate(spreadsheetId, batchUpdate)
+					.execute();
+	}
 
 	/**
 	 * Prints the names and majors of students in a sample spreadsheet:

@@ -37,7 +37,7 @@ public class StringHelper
 		String columnLetters = arr[0].trim();
 		String rowNumbers = startingCell.substring(columnLetters.length()).trim();
 		Integer numberInts = Integer.parseInt(rowNumbers);
-		Long columnAdditions = data.get(0).size()+0L;
+		Long columnAdditions = data.get(0).size()-1+0L;
 		Integer rowAdditions = data.size()-1;
 		String endColumn = columnLetters;
 		if(columnAdditions > 0)

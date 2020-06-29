@@ -2,11 +2,11 @@ package helpers;
 
 public class Logger
 {
-	public static Logger getInstance(LogLevel logLevelInput)
+	public static Logger getInstance()
 	{
-		logLevel = logLevelInput;
 		return LoggerSingletonHelper.INSTANCE;
 	}
+
 
 	private static class LoggerSingletonHelper
 	{
@@ -37,6 +37,13 @@ public class Logger
 	private static LogLevel logLevel;
 
 	private Logger(LogLevel logLevel)
+	{
+		this.logLevel = logLevel;
+	}
+
+	private Logger() { this.logLevel = LogLevel.DEBUG; }
+
+	public void setLogLevel(LogLevel logLevel)
 	{
 		this.logLevel = logLevel;
 	}

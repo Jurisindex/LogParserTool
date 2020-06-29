@@ -1,6 +1,7 @@
 import helpers.Logger;
 import helpers.SheetsAPI;
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.FileInputStream;
@@ -8,47 +9,235 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.security.GeneralSecurityException;
 import java.time.*;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public class ApplicationRoot
 {
-    private static Logger logger = Logger.getInstance(Logger.LogLevel.DEBUG);
+    private static Logger logger = Logger.getInstance();
 
-    public static void main(String[] args)
+    public static void main(String[] args) throws GeneralSecurityException, IOException
     {
-        //Load properties from properties file
+        logger.setLogLevel(Logger.LogLevel.INFO);
+        //Load properties from properties file, and set up our Google Sheets API
         Properties prop = loadProperties("src/main/resources/application.properties");
+        String weeksLookback = prop.getProperty("weeksLookback");
+        SheetsAPI sheetsAPI = new SheetsAPI();
 
-        //Get the current DateTime and day.
-        LocalDateTime dateTimeNow = LocalDateTime.now();
-        Long epochTimeNow = dateTimeNow.toEpochSecond(ZoneOffset.UTC) * 1000;   //Need in milliseconds.
-        DayOfWeek dayOfWeekNow = dateTimeNow.getDayOfWeek();
+        //Extract all properties values so we can use them more easily.
+        String spreadsheetId = prop.getProperty("spreadsheetId");
+        try
+        {
+            updateAttendanceToLatest(sheetsAPI, spreadsheetId, prop);
+        }
+        catch (IOException | GeneralSecurityException e)
+        {
+            logger.error("Exception in updating sheet.");
+            logger.error(e.getLocalizedMessage());
+        }
 
-        //Set the lookbackPeriod to X weeks from this week's Monday.
-        //We raid on Tues/Wed, if we run this report on Monday, or Pre-raid Tuesday,
-        //The Agreement is that we only get X weeks data.
-        Integer weeksToLookBack = Integer.parseInt(prop.getProperty("weeksLookback"));
-        LocalDateTime lookbackPeriod = getLocalDateTimeWeeksOnDayAgo(weeksToLookBack, DayOfWeek.MONDAY, dateTimeNow);
-        Long epochTimeLookbackPeriod = lookbackPeriod.toEpochSecond(ZoneOffset.UTC) * 1000; //Need in milliseconds.
+        //TODO: Make Use altToMainMapping and attendanceEntry to create an attendanceAggregate.
+    }
+
+    private static void updateAttendanceToLatest(SheetsAPI sheetsAPI, String spreadsheetId, Properties prop) throws IOException, GeneralSecurityException
+    {
+        String weeksLookback = prop.getProperty("weeksLookback");
+        List<String> inclusionText = Arrays.asList(prop.getProperty("inclusionText").split(","));
+        List<String> splitIndicator = Arrays.asList(prop.getProperty("splitIndicator").split(","));
 
         //Create guild, and set up the WarcraftLogsAPI to properly send and retrieve calls.
         Guild myGuild = new Guild(prop.getProperty("guildName"), prop.getProperty("serverName"), prop.getProperty("region"));
         WarcraftLogsAPI wlogsApi = new WarcraftLogsAPI(prop.getProperty("apiKey"));
-        List<String> inclusionText = Arrays.asList(prop.getProperty("inclusionText").split(","));
-        List<String> splitIndicator = Arrays.asList(prop.getProperty("splitIndicator").split(","));
 
-        //Get all reports within a timeframe
-        JSONArray reportsInTimeframe = wlogsApi.getReportsByGuild(myGuild, epochTimeNow, epochTimeLookbackPeriod);
-        String oldestRaidLookedUpTitle = ((JSONObject) reportsInTimeframe.get(reportsInTimeframe.length()-1)).getString("title");
+        //Get all the raids we haven't processed yet.
+        LocalDateTime dateTimeNow = LocalDateTime.now();
+        Long epochTimeNow = dateTimeNow.toEpochSecond(ZoneOffset.UTC) * 1000;   //Need in milliseconds.
+        LocalDateTime latestWeProcessed = getLatestProcessedDate(sheetsAPI, spreadsheetId);
+        LocalDateTime lookbackTime = getLocalDateTimeWeeksOnDayAgo(Integer.parseInt(weeksLookback), DayOfWeek.MONDAY, dateTimeNow);
+        lookbackTime = latestWeProcessed.isAfter(lookbackTime) ? latestWeProcessed.plusHours(36L) : lookbackTime;
+        JSONArray reportsInTimeframe = getLatestReportsWeHaventProcessed(lookbackTime, epochTimeNow, myGuild, wlogsApi);
+        //Debug message to show where we're working from.
+        String oldestRaidLookedUpTitle = reportsInTimeframe.getJSONObject(reportsInTimeframe.length()-1).getString("title");
         logger.info("The oldest raid we're looking up is one titled: " + oldestRaidLookedUpTitle);
+
+        //Get all raid group relevant reportIds.
+        List<String> relevantReportIDs = getAllRaidRelevantReportIds(reportsInTimeframe, inclusionText, splitIndicator);
+        //README: Very hacky workaround. See comment near end of ApplicationRoot.getAllRaidRelevantReportIds.
+        Integer totalRaids = Integer.parseInt(relevantReportIDs.remove(0));
+
+        //From there. Get all those reports. The friendlies, the startTime,
+
+        //Fill out the list of attendanceEntries. This is the big one.
+        List<AttendanceEntry> attendanceEntries = fillOutAttendanceEntries(relevantReportIDs, wlogsApi);
+        //Don't continue processing if we don't need to
+        if(attendanceEntries.isEmpty())
+        {
+            logger.info("No new attendance entries to process.");
+            return;
+        }
+
+        //Convert to 2dList and print in sheet.
+        List<List<String>> attendencesAsStringLists = convertAttendenceListTo2dList(attendanceEntries);
+
+        //Index what we've processed this so far.
+        LocalDateTime latestUpdate = getDateFromListInColumn(attendencesAsStringLists, 4).atStartOfDay();
+        List<String> dateUpdate = new ArrayList<>();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy");
+        dateUpdate.add(latestUpdate.format(formatter));
+        dateUpdate.add(String.valueOf(attendanceEntries.size()));
+
+        sheetsAPI.append2dData(spreadsheetId, Collections.singletonList(dateUpdate), "datesUpdated");
+        sheetsAPI.append2dData(spreadsheetId, attendencesAsStringLists, "attendanceEntry");
+    }
+
+    private static List<List<String>> convertAttendenceListTo2dList(List<AttendanceEntry> attendanceList)
+    {
+        List<List<String>> attendanceStringList = new ArrayList<>(attendanceList.size());
+
+        for(AttendanceEntry entry : attendanceList)
+        {
+            List<String> attendanceEntryAsList = entry.toList();
+            attendanceStringList.add(attendanceEntryAsList);
+        }
+
+        return attendanceStringList;
+    }
+
+    //The big one.
+    private static List<AttendanceEntry> fillOutAttendanceEntries(List<String> relevantReportIDs, WarcraftLogsAPI wlogsApi)
+    {
+        List<AttendanceEntry> attendanceEntries = new ArrayList<>();
+        for(String reportId : relevantReportIDs)
+        {
+            HashMap<Integer, Player> sourceIdToPlayerMapping = new HashMap<>();
+            HashMap<Integer, Set<WorldBuffs>> sourceIdToWorldBuffsMapping = new HashMap<>();
+
+            //Create all the sourceId and PlayerMappings.
+            JSONObject output = wlogsApi.getReportById(reportId);
+            JSONArray fights = output.getJSONArray("fights");
+            Long firstBossTimeStart = 50000000L;
+            for(int i = 0; i < fights.length(); i++)
+            {
+                JSONObject fight = fights.getJSONObject(i);
+                if(fight.getInt("boss") != 0)
+                {
+                    logger.info(output.getString("title") + "'s first boss fight is: " + fight.getString("name"));
+                    firstBossTimeStart = fight.getLong("start_time");
+                    break;
+                }
+            }
+            JSONArray combatInfo = wlogsApi.getEventTypesByReportId(reportId, 0L, firstBossTimeStart, "combatantinfo").getJSONArray("events");
+            JSONArray removedBuffs = wlogsApi.getEventTypesByReportId(reportId, 0L, firstBossTimeStart, "removebuff").getJSONArray("events");
+            JSONArray friendlies = output.getJSONArray("friendlies");
+            for(int i = 0; i < friendlies.length(); i++)
+            {
+                JSONObject friendly = (JSONObject) friendlies.get(i);
+                Integer sourceId = friendly.getInt("id");
+                String classType = friendly.getString("type");
+                WoWClass wClass = WoWClass.getClass(classType);
+                if(wClass == null)
+                {
+                    continue;
+                }
+                Player friendlyPlayer = new Player(friendly.getString("name"), WoWClass.valueOf(classType));
+                sourceIdToPlayerMapping.put(sourceId, friendlyPlayer);
+            }
+
+            //Get all the WorldBuff mappings at the first boss
+            sourceIdToWorldBuffsMapping = updateWorldBuffMappingGivenCombatantInfoEvents(sourceIdToWorldBuffsMapping, combatInfo);
+
+
+            //Get all the world buffs that fell off between first boss and log start
+            sourceIdToWorldBuffsMapping = updateWorldBuffMappingGivenRemovedBuffsEvents(sourceIdToWorldBuffsMapping, removedBuffs);
+
+            //Get auxillary information
+            String zone = wlogsApi.getZoneMapping(output.getInt("zone"));
+            Long startTime = output.getLong("start");
+            LocalDateTime dateOfLog = Instant.ofEpochMilli(startTime).atZone(ZoneId.systemDefault()).toLocalDateTime();
+
+            //Create attendance entries from the mappings.
+            for(Map.Entry<Integer, Player> idPlayerMapping : sourceIdToPlayerMapping.entrySet())
+            {
+                Integer id = idPlayerMapping.getKey();
+                Player player = idPlayerMapping.getValue();
+                Set<WorldBuffs> wbuffs = sourceIdToWorldBuffsMapping.get(id);
+                if(wbuffs == null)
+                {
+                    logger.warn("World Buffs null for Player " + player.name + ". Friendlies in \""+output.getString("title")+"\" are: ");
+                    logger.warn(friendlies.toString());
+                }
+                AttendanceEntry entry = new AttendanceEntry(player, id, reportId, dateOfLog, zone, wbuffs);
+                attendanceEntries.add(entry);
+            }
+        }
+
+        return attendanceEntries;
+    }
+
+    private static HashMap<Integer, Set<WorldBuffs>> updateWorldBuffMappingGivenCombatantInfoEvents(HashMap<Integer, Set<WorldBuffs>> sourceIdToWorldBuffsMapping, JSONArray combatInfo)
+    {
+        for(int i = 0; i < combatInfo.length(); i++)
+        {
+            JSONObject combatant = (JSONObject) combatInfo.get(i);
+            Set<WorldBuffs> worldBuffsSet = new HashSet<>();
+            JSONArray worldBuffAuras = combatant.getJSONArray("auras");
+            Integer id = combatant.getInt("sourceID");
+            //Add every wbuff aura to the set
+            for(int j = 0; j < worldBuffAuras.length(); j++)
+            {
+                JSONObject oneAura = worldBuffAuras.getJSONObject(j);
+                Integer wbuffId = oneAura.getInt("ability");
+                //Figure out which wbuff it is by Id
+                WorldBuffs wbuff = WorldBuffs.whichWorldBuff(wbuffId);
+                //Add it if it's a wbuff
+                if(wbuff != null)
+                {
+                    worldBuffsSet.add(wbuff);
+                }
+            }
+            sourceIdToWorldBuffsMapping.put(id, worldBuffsSet);
+        }
+
+        return sourceIdToWorldBuffsMapping;
+    }
+
+    private static HashMap<Integer, Set<WorldBuffs>> updateWorldBuffMappingGivenRemovedBuffsEvents(HashMap<Integer, Set<WorldBuffs>> sourceIdToWorldBuffsMapping, JSONArray removedBuffs)
+    {
+        for(int i = 0; i < removedBuffs.length(); i++)
+        {
+            JSONObject removedBuff = removedBuffs.getJSONObject(i);
+            Integer wbuffId = removedBuff.getJSONObject("ability").getInt("guid");
+            WorldBuffs wbuff = WorldBuffs.whichWorldBuff(wbuffId);
+            //Add it to that player's set if it's a wbuff
+            if(wbuff != null)
+            {
+                Integer playerId = 0;
+                try
+                {
+                    playerId = removedBuff.getInt("targetID");
+                }
+                catch (JSONException e)
+                {
+                    logger.warn("No key \"targetID\" for JSON object:");
+                    logger.warn(removedBuff.toString());
+                }
+                Set<WorldBuffs> buffsAlready = sourceIdToWorldBuffsMapping.get(playerId);
+                if(buffsAlready == null)
+                {
+                    buffsAlready = new HashSet<>();
+                }
+                buffsAlready.add(wbuff);
+                sourceIdToWorldBuffsMapping.put(playerId, buffsAlready);
+            }
+        }
+
+        return sourceIdToWorldBuffsMapping;
+    }
+
+    private static List<String> getAllRaidRelevantReportIds(JSONArray reportsInTimeframe,
+                                                            List<String> inclusionText, List<String> splitIndicator)
+    {
         List<String> relevantReportIDs = new ArrayList<>();
-        Calendar.getInstance().getTime();
-
-        //ONE OFF TEST.
-        JSONObject getCombatantInfoByReportId = wlogsApi.getCombatantInfoByReportId("anXyAgGtLNFZV3kD");
-        JSONObject totalReport = wlogsApi.getReportById("anXyAgGtLNFZV3kD");
-        JSONArray combatInfoArray = getCombatantInfoByReportId.getJSONArray("events");
-
         //Get all reports that are Raid1 Relevant.
         Integer amountSplits = 0;
         for(int i=0; i < reportsInTimeframe.length(); i++)
@@ -67,55 +256,83 @@ public class ApplicationRoot
         //This is liable to fuck up should we ever do 1 ZG only in a night.
         Integer totalRaids = relevantReportIDs.size() - (amountSplits/2);
 
-        //For each report that's Raid1 relevant, get the list of raiders in that report.
-        List<JSONArray> raidAttendences = new ArrayList<>();
-        List<JSONArray> friendlies = new ArrayList<>();
-        List<Long> startTimes = new ArrayList<>();
-        for(String s : relevantReportIDs)
+        //README: This is some VERY Hacky stuff. I'm essentially using this to pass back a 2nd return value.
+        //This represents the COUNT of unique expected raids a raider could possible have attended.
+        //I pass it as a string in the 0th index, and then remove it first thing after I return.
+        relevantReportIDs.add(0, String.valueOf(totalRaids));
+
+        return relevantReportIDs;
+    }
+
+    private static LocalDateTime getLatestProcessedDate(SheetsAPI sheetsAPI, String spreadsheetId) throws GeneralSecurityException, IOException
+    {
+        //Get the attendanceRecords that exist in the sheet.
+        List<List<String>> datesUpdated = sheetsAPI.getRows(spreadsheetId,
+                "datesUpdated", "A:Z");
+
+        LocalDate ld = getLatestDateInList(datesUpdated);
+
+        return ld.atStartOfDay();
+    }
+
+    private static LocalDate getLatestDateInList(List<List<String>> attendencesAsStringLists)
+    {
+        LocalDate ld = Instant.ofEpochMilli(0L).atZone(ZoneId.systemDefault()).toLocalDate();
+
+        List<String> headersRow = attendencesAsStringLists.get(0);
+        Integer dateColumn = getIndexThatEquals(headersRow, "date");
+
+        if(attendencesAsStringLists.size() <= 1 || dateColumn.equals(-1))
         {
-            JSONObject output = wlogsApi.getReportById(s);
-            JSONArray raiders = output.getJSONArray("exportedCharacters");
-            friendlies.add(output.getJSONArray("friendlies"));
-            startTimes.add(output.getLong("start"));
-            raidAttendences.add(raiders);
+            return ld;
         }
 
-        LocalDateTime ldt = Instant.ofEpochMilli(123L).atZone(ZoneId.systemDefault()).toLocalDateTime();
-        ldt.getDayOfWeek();
+        ld = getDateFromListInColumn(attendencesAsStringLists, dateColumn);
 
-        //Separate out each raider and count their appearances.
-        Map<String, Integer> raiderAttendanceCount = new HashMap<>();
-        for(JSONArray array : raidAttendences)
+        return ld;
+    }
+
+    private static LocalDate getDateFromListInColumn(List<List<String>> list, Integer dateColumn)
+    {
+        LocalDate ld = Instant.ofEpochMilli(0L).atZone(ZoneId.systemDefault()).toLocalDate();
+
+        for(int i = 1; i < list.size(); i++)
         {
-            for(int i = 0; i < array.length(); i++)
+            List<String> thisRow = list.get(i);
+
+            LocalDate thisRowTime = LocalDate.parse(thisRow.get(dateColumn), DateTimeFormatter.ofPattern("dd-MM-yyyy"));
+            if(thisRowTime.isAfter(ld))
             {
-                JSONObject raiderObject = array.getJSONObject(i);
-                String name = raiderObject.getString("name");
-                raiderAttendanceCount = addOrUpdate(raiderAttendanceCount, name);
+                ld = thisRowTime;
             }
         }
-        Map<String, Integer> sortedRaiderAttendanceCount = new TreeMap<>(raiderAttendanceCount);
-        List<List<String>> cellRepresentations = new ArrayList<>();
 
-        for(Map.Entry<String, Integer> entry : sortedRaiderAttendanceCount.entrySet())
-        {
-            List<String> raiderInfo = new ArrayList<>();
-            raiderInfo.add(entry.getKey());
-            raiderInfo.add(String.valueOf(entry.getValue()));
-            cellRepresentations.add(raiderInfo);
-        }
-        cellRepresentations.add(0, Arrays.asList("Raiders:", "Attendance (out of " + totalRaids + ")"));
+        return ld;
+    }
 
-        SheetsAPI sheetsAPI = new SheetsAPI();
-        try
+    private static Integer getIndexThatEquals(List<String> headersRow, String match)
+    {
+        int index = 0;
+        for(; index < headersRow.size(); index++)
         {
-            sheetsAPI.write2dDataStartingAt(prop.getProperty("spreadsheetId"), cellRepresentations, "A1");
+            if(headersRow.get(index).equals(match))
+            {
+                return index;
+            }
         }
-        catch (IOException | GeneralSecurityException e)
-        {
-            System.out.println("Error writing to spreadsheet:");
-            e.printStackTrace();
-        }
+
+        return -1;
+    }
+
+    private static JSONArray getLatestReportsWeHaventProcessed(LocalDateTime lookbackPeriod, Long epochTimeNow,
+                                                               Guild myGuild, WarcraftLogsAPI wlogsApi)
+    {
+        Long epochTimeLookbackPeriod = lookbackPeriod.toEpochSecond(ZoneOffset.UTC) * 1000; //Need in milliseconds.
+
+        //Search wlogs till the earliest one, between the timeframes of then and now
+        JSONArray reportsInTimeframe = wlogsApi.getReportsByGuild(myGuild, epochTimeNow, epochTimeLookbackPeriod);
+
+        return reportsInTimeframe;
     }
 
     private static boolean containsOneOfInList(String title, List<String> inclusionText)

@@ -3,6 +3,8 @@ import helpers.RestClient;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.HashMap;
+
 public class WarcraftLogsAPI
 {
 	private RestClient restClient;
@@ -11,11 +13,26 @@ public class WarcraftLogsAPI
 	private String reportsByGuildRoute = "/reports/guild/";
 	private String reportsByIdRoute = "/report/fights/";
 	private String eventsInReportId = "/report/events/";
+	private HashMap<Integer, String> zoneMappings;
 
 	public WarcraftLogsAPI(String apiKey)
 	{
 		this.apiKey = apiKey;
 		this.restClient = new RestClient();
+		this.zoneMappings = new HashMap<>();
+		setUpZoneMappings();
+	}
+
+	private void setUpZoneMappings()
+	{
+		//Maybe the right way to do it is ping them each time for the updated list, but ehhh.
+		zoneMappings.put(1000,"MC");
+		zoneMappings.put(1001,"Ony");
+		zoneMappings.put(1002,"BWL");
+		zoneMappings.put(1003,"ZG");
+		zoneMappings.put(1004,"AQ20");
+		zoneMappings.put(1005,"AQ40");
+		zoneMappings.put(1500,"Placeholder");
 	}
 
 	public void setApiKey(String key)
@@ -58,10 +75,10 @@ public class WarcraftLogsAPI
 		}
 	}
 
-	public JSONObject getCombatantInfoByReportId(String reportId)
+	public JSONObject getEventTypesByReportId(String reportId, Long startTime, Long endTime, String filterType)
 	{
 		String fullUrl = baseAPIEndpoint + eventsInReportId + reportId;
-		String queryParamsString = "?start=0&end=500000000&filter=type=\"combatantinfo\"" + "&api_key="+apiKey;
+		String queryParamsString = "?start="+startTime+"&end="+endTime+"&filter=type=\""+filterType+"\"" + "&api_key="+apiKey;
 		HttpResponse response = restClient.get(fullUrl, queryParamsString, "Jurisnoctis");
 		if(response.is2xx())
 		{
@@ -72,5 +89,10 @@ public class WarcraftLogsAPI
 		{
 			return null;
 		}
+	}
+
+	public String getZoneMapping(Integer zoneId)
+	{
+		return zoneMappings.get(zoneId);
 	}
 }

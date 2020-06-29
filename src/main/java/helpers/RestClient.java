@@ -12,7 +12,7 @@ import java.util.StringJoiner;
 
 public class RestClient
 {
-	private static Logger logger = Logger.getInstance(Logger.LogLevel.WARNING);
+	private static Logger logger = Logger.getInstance();
 
 	public HttpResponse get(String url, String urlParams, String userAgent)
 	{
