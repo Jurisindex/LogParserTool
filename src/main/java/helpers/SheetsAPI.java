@@ -153,7 +153,7 @@ public class SheetsAPI
 				service.spreadsheets().values().append(spreadsheetId, range, body)
 						.setValueInputOption("USER_ENTERED")
 						.execute();
-		System.out.println(result.getUpdates().getUpdatedCells() + " cells updated.");
+		System.out.println(result.getUpdates().getUpdatedRows() + " rows updated in the " + sheetName + " sheet.");
 	}
 
 	public void createSheet(String spreadsheetId, String newSheetName) throws IOException, GeneralSecurityException {
