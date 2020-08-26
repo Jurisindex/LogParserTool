@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.security.GeneralSecurityException;
 import java.time.*;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public class ApplicationRoot
@@ -37,6 +36,7 @@ public class ApplicationRoot
         }
 
         //TODO: Make Use altToMainMapping and attendanceEntry to create an attendanceAggregate.
+
     }
 
     private static void updateAttendanceToLatest(SheetsAPI sheetsAPI, String spreadsheetId, Properties prop) throws IOException, GeneralSecurityException
@@ -52,20 +52,16 @@ public class ApplicationRoot
         //Get all the raids we haven't processed yet.
         LocalDateTime dateTimeNow = LocalDateTime.now();
         Long epochTimeNow = dateTimeNow.toEpochSecond(ZoneOffset.UTC) * 1000;   //Need in milliseconds.
-        LocalDateTime latestWeProcessed = getLatestProcessedDate(sheetsAPI, spreadsheetId);
+        Long latestWeProcessed = getLatestProcessedDate(sheetsAPI, spreadsheetId);
         LocalDateTime lookbackTime = getLocalDateTimeWeeksOnDayAgo(Integer.parseInt(weeksLookback), DayOfWeek.MONDAY, dateTimeNow);
-        lookbackTime = latestWeProcessed.isAfter(lookbackTime) ? latestWeProcessed.plusHours(36L) : lookbackTime;
-        JSONArray reportsInTimeframe = getLatestReportsWeHaventProcessed(lookbackTime, epochTimeNow, myGuild, wlogsApi);
-        //Debug message to show where we're working from.
-        String oldestRaidLookedUpTitle = reportsInTimeframe.getJSONObject(reportsInTimeframe.length()-1).getString("title");
-        logger.info("The oldest raid we're looking up is one titled: " + oldestRaidLookedUpTitle);
+        Long lookbackEpochTime = lookbackTime.toEpochSecond(ZoneOffset.UTC) * 1000; //Need in milliseconds.
+        lookbackEpochTime = latestWeProcessed > lookbackEpochTime ? latestWeProcessed : lookbackEpochTime;
+        JSONArray reportsInTimeframe = getLatestReportsWeHaventProcessed(lookbackEpochTime, epochTimeNow, myGuild, wlogsApi);
 
         //Get all raid group relevant reportIds.
         List<String> relevantReportIDs = getAllRaidRelevantReportIds(reportsInTimeframe, inclusionText, splitIndicator);
         //README: Very hacky workaround. See comment near end of ApplicationRoot.getAllRaidRelevantReportIds.
         Integer totalRaids = Integer.parseInt(relevantReportIDs.remove(0));
-
-        //From there. Get all those reports. The friendlies, the startTime,
 
         //Fill out the list of attendanceEntries. This is the big one.
         List<AttendanceEntry> attendanceEntries = fillOutAttendanceEntries(relevantReportIDs, wlogsApi);
@@ -75,15 +71,24 @@ public class ApplicationRoot
             logger.info("No new attendance entries to process.");
             return;
         }
+        //Debug message to show where we're working from.
+        String oldestRaidLookedUpTitle = reportsInTimeframe.getJSONObject(reportsInTimeframe.length()-1).getString("title");
+        logger.info("The oldest raid we're looking up is one titled: " + oldestRaidLookedUpTitle);
+
+        //The first one is guaranteed to be the most recent one.
+        //The comparison we later use is greater than or equal to
+        Long latestReportStartTime = reportsInTimeframe.getJSONObject(0).getLong("end") -1L;
 
         //Convert to 2dList and print in sheet.
         List<List<String>> attendencesAsStringLists = convertAttendenceListTo2dList(attendanceEntries);
 
         //Index what we've processed this so far.
-        LocalDateTime latestUpdate = getDateFromListInColumn(attendencesAsStringLists, 4).atStartOfDay();
+        //We used to do LocalDateTime, but I went for a more
+//        LocalDateTime latestUpdate = getDateFromListInColumn(attendencesAsStringLists, 4).atStartOfDay();
+//        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy");
+
         List<String> dateUpdate = new ArrayList<>();
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy");
-        dateUpdate.add(latestUpdate.format(formatter));
+        dateUpdate.add(String.valueOf(latestReportStartTime));
         dateUpdate.add(String.valueOf(attendanceEntries.size()));
 
         sheetsAPI.append2dData(spreadsheetId, Collections.singletonList(dateUpdate), "datesUpdated");
@@ -264,20 +269,18 @@ public class ApplicationRoot
         return relevantReportIDs;
     }
 
-    private static LocalDateTime getLatestProcessedDate(SheetsAPI sheetsAPI, String spreadsheetId) throws GeneralSecurityException, IOException
+    private static Long getLatestProcessedDate(SheetsAPI sheetsAPI, String spreadsheetId) throws GeneralSecurityException, IOException
     {
         //Get the attendanceRecords that exist in the sheet.
         List<List<String>> datesUpdated = sheetsAPI.getRows(spreadsheetId,
                 "datesUpdated", "A:Z");
 
-        LocalDate ld = getLatestDateInList(datesUpdated);
-
-        return ld.atStartOfDay();
+        return getLatestDateInList(datesUpdated);
     }
 
-    private static LocalDate getLatestDateInList(List<List<String>> attendencesAsStringLists)
+    private static Long getLatestDateInList(List<List<String>> attendencesAsStringLists)
     {
-        LocalDate ld = Instant.ofEpochMilli(0L).atZone(ZoneId.systemDefault()).toLocalDate();
+        Long ld = 0L;
 
         List<String> headersRow = attendencesAsStringLists.get(0);
         Integer dateColumn = getIndexThatEquals(headersRow, "date");
@@ -292,16 +295,16 @@ public class ApplicationRoot
         return ld;
     }
 
-    private static LocalDate getDateFromListInColumn(List<List<String>> list, Integer dateColumn)
+    private static Long getDateFromListInColumn(List<List<String>> list, Integer dateColumn)
     {
-        LocalDate ld = Instant.ofEpochMilli(0L).atZone(ZoneId.systemDefault()).toLocalDate();
+        Long ld = 0L;
 
         for(int i = 1; i < list.size(); i++)
         {
             List<String> thisRow = list.get(i);
 
-            LocalDate thisRowTime = LocalDate.parse(thisRow.get(dateColumn), DateTimeFormatter.ofPattern("dd-MM-yyyy"));
-            if(thisRowTime.isAfter(ld))
+            Long thisRowTime = Long.parseLong(thisRow.get(dateColumn));
+            if(thisRowTime > ld)
             {
                 ld = thisRowTime;
             }
@@ -324,13 +327,11 @@ public class ApplicationRoot
         return -1;
     }
 
-    private static JSONArray getLatestReportsWeHaventProcessed(LocalDateTime lookbackPeriod, Long epochTimeNow,
+    private static JSONArray getLatestReportsWeHaventProcessed(Long lookbackPeriod, Long epochTimeNow,
                                                                Guild myGuild, WarcraftLogsAPI wlogsApi)
     {
-        Long epochTimeLookbackPeriod = lookbackPeriod.toEpochSecond(ZoneOffset.UTC) * 1000; //Need in milliseconds.
-
         //Search wlogs till the earliest one, between the timeframes of then and now
-        JSONArray reportsInTimeframe = wlogsApi.getReportsByGuild(myGuild, epochTimeNow, epochTimeLookbackPeriod);
+        JSONArray reportsInTimeframe = wlogsApi.getReportsByGuild(myGuild, epochTimeNow, lookbackPeriod);
 
         return reportsInTimeframe;
     }
