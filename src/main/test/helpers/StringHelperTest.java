@@ -21,7 +21,7 @@ public class StringHelperTest
 			data.add(Arrays.asList("Stuff", "Doesn't Matter", "Just making a 10x3"));
 		}
 		String range = stringHelper.getRangeCalculation(data, startingCell);
-		assert range.equals("Y41:AB50");
+		assert range.equals("Y41:AA50");
 	}
 
 	@Test
@@ -39,7 +39,7 @@ public class StringHelperTest
 		String first = "DSZZ";
 		String second = "ZAZXZ";
 		String result = stringHelper.addTwo26AlphabetStrings(first, second);
-		assert result.equals("AB");
+		assert result.equals("ZFTYZ");
 	}
 
 	@Test
@@ -66,7 +66,7 @@ public class StringHelperTest
 		String first = "ZZ";
 		String second = "Z";
 		String result = stringHelper.addTwo26AlphabetStrings(first, second);
-		assert result.equals("ZAZ");
+		assert result.equals("AAZ");
 	}
 
 	@Test

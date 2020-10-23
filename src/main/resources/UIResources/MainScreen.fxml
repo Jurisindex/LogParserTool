@@ -1,0 +1,16 @@
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<GridPane fx:controller="MainController" fx:id="gridPane"
+          xmlns:fx="http://javafx.com/fxml" alignment="TOP_LEFT">
+<!--    <HBox fx:id="guildName" />-->
+<!--    <HBox fx:id="serverName" />-->
+<!--    <HBox fx:id="region" />-->
+<!--    <HBox fx:id="apiKey" />-->
+<!--    <HBox fx:id="weeksLookback" />-->
+<!--    <HBox fx:id="inclusionText" />-->
+<!--    <HBox fx:id="splitIndicator" />-->
+<!--    <HBox fx:id="spreadsheetId" />-->
+<!--    <Button fx:id="runButton" text="Run The Program" onAction="#dryRun"/>-->
+<!--    <HBox fx:id="statusText"/>-->
+</GridPane>

@@ -1,3 +1,4 @@
+import helpers.LogParseInputData;
 import helpers.Logger;
 import helpers.SheetsAPI;
 import org.json.JSONArray;
@@ -11,18 +12,26 @@ import java.security.GeneralSecurityException;
 import java.time.*;
 import java.util.*;
 
+//As a user, I want to be able to see all my guild's reports and name of said reports chronologically
+//Definitely work on a UI wrapper first.
+
+
 public class ApplicationRoot
 {
     private static Logger logger = Logger.getInstance();
 
-    public static void main(String[] args) throws GeneralSecurityException, IOException
+    public static void applicationDryRun(LogParseInputData data) throws GeneralSecurityException, IOException
     {
         logger.setLogLevel(Logger.LogLevel.INFO);
         //Load properties from properties file, and set up our Google Sheets API
-        Properties prop = loadProperties("src/main/resources/application.properties");
-        String weeksLookback = prop.getProperty("weeksLookback");
         SheetsAPI sheetsAPI = new SheetsAPI();
+        Properties prop = loadProperties("src/main/resources/application.properties");
 
+        initializeRoutine(prop, sheetsAPI);
+    }
+
+    private static void initializeRoutine(Properties prop, SheetsAPI sheetsAPI)
+    {
         //Extract all properties values so we can use them more easily.
         String spreadsheetId = prop.getProperty("spreadsheetId");
         try
@@ -36,7 +45,6 @@ public class ApplicationRoot
         }
 
         //TODO: Make Use altToMainMapping and attendanceEntry to create an attendanceAggregate.
-
     }
 
     private static void updateAttendanceToLatest(SheetsAPI sheetsAPI, String spreadsheetId, Properties prop) throws IOException, GeneralSecurityException
@@ -242,6 +250,11 @@ public class ApplicationRoot
     private static List<String> getAllRaidRelevantReportIds(JSONArray reportsInTimeframe,
                                                             List<String> inclusionText, List<String> splitIndicator)
     {
+        //If nothing specific we're looking for, pick up everything.
+        if(inclusionText.isEmpty())
+        {
+            inclusionText.add("");
+        }
         List<String> relevantReportIDs = new ArrayList<>();
         //Get all reports that are Raid1 Relevant.
         Integer amountSplits = 0;
