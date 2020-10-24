@@ -1,4 +1,4 @@
-import helpers.LogParseInputData;
+import UIHelpers.LogParseInputData;
 import helpers.Logger;
 import helpers.SheetsAPI;
 import org.json.JSONArray;
@@ -20,23 +20,28 @@ public class ApplicationRoot
 {
     private static Logger logger = Logger.getInstance();
 
-    public static void applicationDryRun(LogParseInputData data) throws GeneralSecurityException, IOException
+    public static void applicationDryRun(LogParseInputData data) throws Exception
     {
         logger.setLogLevel(Logger.LogLevel.INFO);
+
+        if(!data.verifyAllDataIsHere())
+        {
+            logger.error("Not all mandatory fields were marked");
+            throw new Exception("Not all mandatory fields were marked");
+        }
         //Load properties from properties file, and set up our Google Sheets API
         SheetsAPI sheetsAPI = new SheetsAPI();
-        Properties prop = loadProperties("src/main/resources/application.properties");
+        //Properties prop = loadProperties("src/main/resources/application.properties");
 
-        initializeRoutine(prop, sheetsAPI);
+        initializeRoutine(data, sheetsAPI);
     }
 
-    private static void initializeRoutine(Properties prop, SheetsAPI sheetsAPI)
+    private static void initializeRoutine(LogParseInputData data, SheetsAPI sheetsAPI)
     {
         //Extract all properties values so we can use them more easily.
-        String spreadsheetId = prop.getProperty("spreadsheetId");
         try
         {
-            updateAttendanceToLatest(sheetsAPI, spreadsheetId, prop);
+            updateAttendanceToLatest(sheetsAPI, data);
         }
         catch (IOException | GeneralSecurityException e)
         {
@@ -47,21 +52,22 @@ public class ApplicationRoot
         //TODO: Make Use altToMainMapping and attendanceEntry to create an attendanceAggregate.
     }
 
-    private static void updateAttendanceToLatest(SheetsAPI sheetsAPI, String spreadsheetId, Properties prop) throws IOException, GeneralSecurityException
+    private static void updateAttendanceToLatest(SheetsAPI sheetsAPI, LogParseInputData data) throws IOException, GeneralSecurityException
     {
-        String weeksLookback = prop.getProperty("weeksLookback");
-        List<String> inclusionText = Arrays.asList(prop.getProperty("inclusionText").split(","));
-        List<String> splitIndicator = Arrays.asList(prop.getProperty("splitIndicator").split(","));
+        Integer weeksLookback = data.weeksLookback;
+        String spreadsheetId = data.spreadsheetId;
+        List<String> inclusionText = data.inclusionText;
+        List<String> splitIndicator = data.splitIndicators;
 
         //Create guild, and set up the WarcraftLogsAPI to properly send and retrieve calls.
-        Guild myGuild = new Guild(prop.getProperty("guildName"), prop.getProperty("serverName"), prop.getProperty("region"));
-        WarcraftLogsAPI wlogsApi = new WarcraftLogsAPI(prop.getProperty("apiKey"));
+        Guild myGuild = new Guild(data.guildName, data.serverName, data.region);
+        WarcraftLogsAPI wlogsApi = new WarcraftLogsAPI(data.apiKey);
 
         //Get all the raids we haven't processed yet.
         LocalDateTime dateTimeNow = LocalDateTime.now();
         Long epochTimeNow = dateTimeNow.toEpochSecond(ZoneOffset.UTC) * 1000;   //Need in milliseconds.
         Long latestWeProcessed = getLatestProcessedDate(sheetsAPI, spreadsheetId);
-        LocalDateTime lookbackTime = getLocalDateTimeWeeksOnDayAgo(Integer.parseInt(weeksLookback), DayOfWeek.MONDAY, dateTimeNow);
+        LocalDateTime lookbackTime = getLocalDateTimeWeeksOnDayAgo(weeksLookback, DayOfWeek.MONDAY, dateTimeNow);
         Long lookbackEpochTime = lookbackTime.toEpochSecond(ZoneOffset.UTC) * 1000; //Need in milliseconds.
         lookbackEpochTime = latestWeProcessed > lookbackEpochTime ? latestWeProcessed : lookbackEpochTime;
         JSONArray reportsInTimeframe = getLatestReportsWeHaventProcessed(lookbackEpochTime, epochTimeNow, myGuild, wlogsApi);
@@ -374,7 +380,7 @@ public class ApplicationRoot
         return raiderAttendanceCount;
     }
 
-    private static Properties loadProperties(String propertiesFilename)
+    public static Properties loadProperties(String propertiesFilename)
     {
         Properties prop = new Properties();
         try

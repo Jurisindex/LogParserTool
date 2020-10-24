@@ -1,4 +1,9 @@
-import helpers.LogParseInputData;
+import UIHelpers.LogParseInputData;
+import helpers.HttpResponse;
+import javafx.animation.Animation;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
+import javafx.concurrent.Task;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.geometry.Insets;
@@ -6,13 +11,15 @@ import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
-import javafx.scene.control.Tooltip;
+import javafx.scene.control.*;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
+import javafx.util.Duration;
 
-import java.io.IOException;
-import java.security.GeneralSecurityException;
+import java.awt.*;
+import java.net.URI;
 import java.util.Arrays;
+import java.util.Properties;
 
 public class MainController
 {
@@ -119,6 +126,93 @@ public class MainController
 		Label dynamicStatusLabel = new Label("Not Yet Started");
 		statusTextHBox = create2NodeHbox(staticStatusLabel, dynamicStatusLabel, hBoxBetweenSpaceWidth);
 		add2NodeHBoxToGridPane(gridPane, statusTextHBox, numberOfRows);
+
+		loadPreviousRunConfigs();
+	}
+
+	public void dryRun(ActionEvent actionEvent)
+	{
+		Label currentStatus = (Label) statusTextHBox.getChildren().get(1);
+		currentStatus.setText("Initialized");
+		update();
+
+		Task<HttpResponse> runApplication;
+		//Collect all the information.
+		LogParseInputData inputData = new LogParseInputData();
+		try
+		{
+			inputData.guildName = findStringInHBoxTextField(guildNameHBox);
+			inputData.serverName = findStringInHBoxTextField(serverNameHBox);
+			inputData.region = findStringInHBoxTextField(regionHBox);
+			inputData.apiKey = findStringInHBoxTextField(apiKeyHBox);
+			inputData.weeksLookback = Integer.parseInt(findStringInHBoxTextField(weeksLookbackHBox));
+			inputData.inclusionText = Arrays.asList(findStringInHBoxTextField(inclusionTextHBox).split(","));
+			inputData.splitIndicators = Arrays.asList(findStringInHBoxTextField(splitIndicatorHBox).split(","));
+			inputData.spreadsheetId = findStringInHBoxTextField(spreadsheetIdHBox);
+
+			ApplicationRoot.applicationDryRun(inputData);
+
+			String spreadsheetURI = "https://docs.google.com/spreadsheets/d/" + inputData.spreadsheetId + "/edit";
+			Hyperlink spreadsheetLink = new Hyperlink("GOTO");
+			spreadsheetLink.setOnAction(event -> clickHyperlink(event, spreadsheetURI));
+			spreadsheetLink.setMaxWidth(60);
+			spreadsheetIdHBox.getChildren().add(spreadsheetLink);
+
+			writeCurrentSuccessfulRunToLocal(inputData);
+		}
+		catch (Exception e)
+		{
+			e.printStackTrace();
+		}
+
+		currentStatus.setText("Completed");
+	}
+
+	private void update()
+	{
+		KeyFrame keyFrame = new KeyFrame(Duration.seconds(1));
+		Timeline timeline = new Timeline();
+		timeline.setCycleCount(Animation.INDEFINITE);
+		//if you want to limit the number of cycles use
+		//timeline.setCycleCount(100);
+		timeline.getKeyFrames().add(keyFrame);
+		timeline.play();
+	}
+
+	private void clickHyperlink(ActionEvent event, String URI)
+	{
+		Desktop desktop = Desktop.isDesktopSupported() ? Desktop.getDesktop() : null;
+		if (desktop != null && desktop.isSupported(Desktop.Action.BROWSE)) {
+			try {
+				desktop.browse(new URI(URI));
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
+	}
+
+	private void loadPreviousRunConfigs()
+	{
+		Properties prop = ApplicationRoot.loadProperties("src/main/resources/application.properties");
+		setHBoxTextField(guildNameHBox, prop.getProperty("guildName"));
+		setHBoxTextField(serverNameHBox, prop.getProperty("serverName"));
+		setHBoxTextField(regionHBox, prop.getProperty("region"));
+		setHBoxTextField(apiKeyHBox, prop.getProperty("apiKey"));
+		setHBoxTextField(weeksLookbackHBox, prop.getProperty("weeksLookback"));
+		setHBoxTextField(inclusionTextHBox, prop.getProperty("inclusionText"));
+		setHBoxTextField(splitIndicatorHBox, prop.getProperty("splitIndicator"));
+		setHBoxTextField(spreadsheetIdHBox, prop.getProperty("spreadsheetId"));
+	}
+
+	private void setHBoxTextField(HBox guildNameHBox, String input)
+	{
+		for(Node n : guildNameHBox.getChildren())
+		{
+			if(n.getClass().equals(TextField.class))
+			{
+				((TextField) n).setText(input);
+			}
+		}
 	}
 
 	private void add2NodeHBoxToGridPane(GridPane gridPane, HBox hBox, int numberOfRows)
@@ -127,33 +221,18 @@ public class MainController
 		this.numberOfRows = numberOfRows + 1;
 	}
 
-	public void dryRun(ActionEvent actionEvent)
+	private void writeCurrentSuccessfulRunToLocal(LogParseInputData inputData)
 	{
-		Label currentStatus = (Label) statusTextHBox.getChildren().get(1);
-		currentStatus.setText("Initialized");
-
-		//Collect all the information.
-		LogParseInputData inputData = new LogParseInputData();
-		inputData.guildName = findStringInHBoxTextField(guildNameHBox);
-		inputData.serverName = findStringInHBoxTextField(serverNameHBox);
-		inputData.region = findStringInHBoxTextField(regionHBox);
-		inputData.apiKey = findStringInHBoxTextField(apiKeyHBox);
-		inputData.weeksLookback = Integer.parseInt(findStringInHBoxTextField(weeksLookbackHBox));
-		inputData.inclusionText = Arrays.asList(findStringInHBoxTextField(inclusionTextHBox).split(","));
-		inputData.splitIndicators = Arrays.asList(findStringInHBoxTextField(splitIndicatorHBox).split(","));
-		inputData.spreadsheetId = findStringInHBoxTextField(spreadsheetIdHBox);
-
-		try
-		{
-			ApplicationRoot.applicationDryRun(inputData);
-		}
-		catch (GeneralSecurityException | IOException e)
-		{
-			e.printStackTrace();
-		}
-		Integer weeksLookback = Integer.parseInt(weeksLookbackHBox.getChildren().get(1).getAccessibleText());
-
-		currentStatus.setText("Completed");
+		//Config IO
+		Properties prop = ApplicationRoot.loadProperties("src/main/resources/application-local.properties");
+		prop.setProperty("guildName", inputData.guildName);
+		prop.setProperty("serverName", inputData.serverName);
+		prop.setProperty("region", inputData.region);
+		prop.setProperty("apiKey", inputData.apiKey);
+		prop.setProperty("weeksLookback", inputData.weeksLookback.toString());
+		prop.setProperty("inclusionText", inputData.inclusionText.toString());
+		prop.setProperty("splitIndicator", inputData.splitIndicators.toString());
+		prop.setProperty("spreadsheetId", inputData.spreadsheetId);
 	}
 
 	private String findStringInHBoxTextField(HBox guildNameHBox)
