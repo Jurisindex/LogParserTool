@@ -4,6 +4,7 @@ import java.time.DayOfWeek;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -20,7 +21,7 @@ public class AttendanceEntry
 	Set<WorldBuffs> worldBuffs;
 	Boolean acceptableWbuffs;
 
-	AttendanceEntry(Player player, Integer idThisRaid, String reportId, LocalDateTime date, String zone, Set<WorldBuffs> worldBuffs)
+	public AttendanceEntry(Player player, Integer idThisRaid, String reportId, LocalDateTime date, String zone, Set<WorldBuffs> worldBuffs)
 	{
 		this.player = player;
 		this.idThisRaid = idThisRaid;
@@ -31,6 +32,43 @@ public class AttendanceEntry
 		this.worldBuffs = worldBuffs;
 		this.zone = zone;
 		acceptableWbuffs = calculateWbuffsAcceptable();
+	}
+
+	public AttendanceEntry(List<String> databaseRow)
+	{
+		this(databaseRow.get(0),databaseRow.get(1),databaseRow.get(2),databaseRow.get(3),
+			 databaseRow.get(4),databaseRow.get(5),databaseRow.get(6), databaseRow.get(7),
+		     databaseRow.get(8));
+	}
+
+	//This acts as an AttendanceEntryDAO. This is hilarious, but... :)
+	public AttendanceEntry(String playerName, String playerClass, String idThisRaid, String reportId, String date,
+						   String dayOfWeek, String zone, String worldBuffs, String wbuffsCheck)
+	{
+		Player player = new Player(playerName, WoWClass.getClass(playerClass));
+		this.player = player;
+		this.idThisRaid = Integer.parseInt(idThisRaid);
+		this.reportId = reportId;
+		this.date = date;
+		this.dayOfWeek = DayOfWeek.valueOf(dayOfWeek);
+		this.zone = zone;
+		//Get rid of brackets, check for error, split.
+		worldBuffs = worldBuffs.substring(1, worldBuffs.length()-1);
+		if(worldBuffs.contains("ERROR"))
+		{
+			this.worldBuffs = null;
+		}
+		else
+		{
+			this.worldBuffs = new HashSet<>();
+			String[] wbuffsSplit = worldBuffs.split(",");
+			for(String buff : wbuffsSplit)
+			{
+				WorldBuffs thisBuff = WorldBuffs.getBuffByShorthand(buff);
+				this.worldBuffs.add(thisBuff);
+			}
+		}
+		this.acceptableWbuffs = Boolean.valueOf(wbuffsCheck);
 	}
 
 	private boolean calculateWbuffsAcceptable()

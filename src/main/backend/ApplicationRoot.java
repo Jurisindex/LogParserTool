@@ -8,6 +8,9 @@ import org.json.JSONObject;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.security.GeneralSecurityException;
 import java.time.*;
 import java.util.*;
@@ -42,14 +45,22 @@ public class ApplicationRoot
         try
         {
             updateAttendanceToLatest(sheetsAPI, data);
+            List<ReportAggregate> reportAggregateData = createReportAggregates(sheetsAPI, data);
+            updateSheetWithAggregateReport(sheetsAPI, data, reportAggregateData);
         }
-        catch (IOException | GeneralSecurityException e)
+        catch (Exception e)
         {
-            logger.error("Exception in updating sheet.");
+            logger.error("Exception in processing.");
             logger.error(e.getLocalizedMessage());
         }
 
         //TODO: Make Use altToMainMapping and attendanceEntry to create an attendanceAggregate.
+    }
+
+    private static void updateSheetWithAggregateReport(SheetsAPI sheetsAPI, LogParseInputData data, List<ReportAggregate> reportAggregateData) throws Exception
+    {
+        List<List<String>> aggregateSheetData = convertObjectListTo2dList(reportAggregateData, ReportAggregate.class);
+        sheetsAPI.append2dData(data.spreadsheetId, aggregateSheetData, "reportAggregate");
     }
 
     private static void updateAttendanceToLatest(SheetsAPI sheetsAPI, LogParseInputData data) throws IOException, GeneralSecurityException
@@ -66,16 +77,16 @@ public class ApplicationRoot
         //Get all the raids we haven't processed yet.
         LocalDateTime dateTimeNow = LocalDateTime.now();
         Long epochTimeNow = dateTimeNow.toEpochSecond(ZoneOffset.UTC) * 1000;   //Need in milliseconds.
-        Long latestWeProcessed = getLatestProcessedDate(sheetsAPI, spreadsheetId);
-        LocalDateTime lookbackTime = getLocalDateTimeWeeksOnDayAgo(weeksLookback, DayOfWeek.MONDAY, dateTimeNow);
-        Long lookbackEpochTime = lookbackTime.toEpochSecond(ZoneOffset.UTC) * 1000; //Need in milliseconds.
-        lookbackEpochTime = latestWeProcessed > lookbackEpochTime ? latestWeProcessed : lookbackEpochTime;
-        JSONArray reportsInTimeframe = getLatestReportsWeHaventProcessed(lookbackEpochTime, epochTimeNow, myGuild, wlogsApi);
+        Long lookbackEpochTime = getLocalDateTimeWeeksOnDayAgo(weeksLookback, DayOfWeek.MONDAY, dateTimeNow);
+
+        List<String> reportsProcessed = getReportsProcessed(sheetsAPI, spreadsheetId);
+        JSONArray reportsInTimeframe = getLatestReportsWeHaventProcessed(lookbackEpochTime, epochTimeNow, myGuild, wlogsApi, reportsProcessed);
 
         //Get all raid group relevant reportIds.
         List<String> relevantReportIDs = getAllRaidRelevantReportIds(reportsInTimeframe, inclusionText, splitIndicator);
         //README: Very hacky workaround. See comment near end of ApplicationRoot.getAllRaidRelevantReportIds.
         Integer totalRaids = Integer.parseInt(relevantReportIDs.remove(0));
+        Collections.reverse(relevantReportIDs); //So we can have the chronological parsing we want.
 
         //Fill out the list of attendanceEntries. This is the big one.
         List<AttendanceEntry> attendanceEntries = fillOutAttendanceEntries(relevantReportIDs, wlogsApi);
@@ -89,24 +100,157 @@ public class ApplicationRoot
         String oldestRaidLookedUpTitle = reportsInTimeframe.getJSONObject(reportsInTimeframe.length()-1).getString("title");
         logger.info("The oldest raid we're looking up is one titled: " + oldestRaidLookedUpTitle);
 
-        //The first one is guaranteed to be the most recent one.
-        //The comparison we later use is greater than or equal to
-        Long latestReportStartTime = reportsInTimeframe.getJSONObject(0).getLong("end") -1L;
-
         //Convert to 2dList and print in sheet.
         List<List<String>> attendencesAsStringLists = convertAttendenceListTo2dList(attendanceEntries);
 
-        //Index what we've processed this so far.
-        //We used to do LocalDateTime, but I went for a more
-//        LocalDateTime latestUpdate = getDateFromListInColumn(attendencesAsStringLists, 4).atStartOfDay();
-//        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy");
+        //Index what we've already indexed.
+        List<List<String>> reportsUpdate = extractReportIDsAndTimestamp(relevantReportIDs, reportsInTimeframe, dateTimeNow);
 
-        List<String> dateUpdate = new ArrayList<>();
-        dateUpdate.add(String.valueOf(latestReportStartTime));
-        dateUpdate.add(String.valueOf(attendanceEntries.size()));
-
-        sheetsAPI.append2dData(spreadsheetId, Collections.singletonList(dateUpdate), "datesUpdated");
+        sheetsAPI.append2dData(spreadsheetId, reportsUpdate, "reportsProcessed");
         sheetsAPI.append2dData(spreadsheetId, attendencesAsStringLists, "attendanceEntry");
+    }
+
+    private static List<ReportAggregate> createReportAggregates(SheetsAPI sheetsAPI, LogParseInputData data)
+    {
+        List<AttendanceEntry> attendanceEntries = getAllAttendanceEntries(sheetsAPI, data.spreadsheetId);
+        Map<String, String> reportIdToTitleMapping = getReportIdToReportTitleMappings(sheetsAPI, data.spreadsheetId);
+        List<ReportAggregate> reportAggregatesAlreadyProcessed = getListFromSpreadsheet(sheetsAPI, data.spreadsheetId, "reportAggregate", ReportAggregate.class);
+        Set<String> reportIDsAlreadyAggregated = extractReportIDsFromReportAggregates(reportAggregatesAlreadyProcessed);
+        List<AttendanceEntry> attendanceEntriesFANCY_WAY = getListFromSpreadsheet(sheetsAPI, data.spreadsheetId, "attendanceEntry", AttendanceEntry.class);
+
+        List<ReportAggregate> aggregationsToAdd = calculateNewReportAggregates(attendanceEntries, reportIDsAlreadyAggregated, reportIdToTitleMapping);
+        return aggregationsToAdd;
+    }
+
+    private static List<ReportAggregate> calculateNewReportAggregates(List<AttendanceEntry> attendanceEntries,
+                                                                      Set<String> alreadyProcessed,
+                                                                      Map<String, String> reportIdToTitleMapping)
+    {
+        Map<String, ReportAggregate> reportIdToAggregateMappings = new HashMap<>();
+        for(AttendanceEntry entry : attendanceEntries)
+        {
+            String reportId = entry.reportId;
+            //If this hasn't already been processed...
+            if(!alreadyProcessed.contains(reportId))
+            {
+                //Get or create
+                ReportAggregate aggregate = reportIdToAggregateMappings.get(reportId);
+                if(aggregate == null)
+                {
+                    aggregate = new ReportAggregate(reportId, reportIdToTitleMapping.get(reportId),
+                                                    new ArrayList<>(), new ArrayList<>(), entry.date, entry.dayOfWeek);
+                }
+
+                //Update and persist
+                String playerName = entry.player.name;
+                aggregate.playersAttended.add(playerName);
+                if(!entry.acceptableWbuffs)
+                {
+                    aggregate.playersWithInsufficientWBuffs.add(playerName);
+                }
+                reportIdToAggregateMappings.put(reportId, aggregate);
+            }
+        }
+        List<ReportAggregate> aggregates = new ArrayList<>();
+        for(Map.Entry<String,ReportAggregate> entry : reportIdToAggregateMappings.entrySet())
+        {
+            aggregates.add(entry.getValue());
+        }
+        return aggregates;
+    }
+
+    private static Map<String, String> getReportIdToReportTitleMappings(SheetsAPI sheetsAPI, String spreadsheetId)
+    {
+        try
+        {
+            List<List<String>> rowsAs2DList = sheetsAPI.getRows(spreadsheetId, "reportsProcessed", "A2:Z");
+
+            Map<String, String> idTitleMap = new HashMap<>();
+            for(List<String> dbRow : rowsAs2DList)
+            {
+                idTitleMap.put(dbRow.get(0), dbRow.get(1));
+            }
+            return idTitleMap;
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+            return new HashMap<>();
+        }
+    }
+
+    private static List getListFromSpreadsheet(SheetsAPI sheetsAPI, String spreadsheetId, String subsheetName, Class reference)
+    {
+        try
+        {
+            List<List<String>> rowsAs2DList = sheetsAPI.getRows(spreadsheetId, subsheetName, "A2:Z");
+
+            List entries = new ArrayList<>();
+            for(List<String> dbRow : rowsAs2DList)
+            {
+                Constructor listConstructor = reference.getDeclaredConstructor(List.class);
+                entries.add(listConstructor.newInstance(dbRow));
+            }
+            return entries;
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+            return new ArrayList();
+        }
+    }
+
+    private static List<AttendanceEntry> getAllAttendanceEntries(SheetsAPI sheetsAPI, String spreadsheetId)
+    {
+        try
+        {
+            List<List<String>> attendanceList = sheetsAPI.getRows(spreadsheetId,
+                    "attendanceEntry", "A2:Z");
+            List<AttendanceEntry> attendanceEntries = new ArrayList<>();
+            for(List<String> attendanceRow : attendanceList)
+            {
+                attendanceEntries.add(new AttendanceEntry(attendanceRow));
+            }
+            return attendanceEntries;
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+            return new ArrayList<>();
+        }
+    }
+
+    private static Set<String> extractReportIDsFromReportAggregates(List<ReportAggregate> reportAggregatesAlreadyProcessed)
+    {
+        Set<String> reportIDs = new HashSet<>();
+
+        for(ReportAggregate ra : reportAggregatesAlreadyProcessed)
+        {
+            reportIDs.add(ra.reportId);
+        }
+
+        return reportIDs;
+    }
+
+    private static List<List<String>> extractReportIDsAndTimestamp(List<String> relevantReportIDs,
+                                                                   JSONArray reportsInTimeframe,
+                                                                   LocalDateTime dateTimeNow)
+    {
+        List<List<String>> return2DList = new ArrayList<>();
+        String dateTimeString = dateTimeNow.toString();
+
+        for(int i = 0; i < reportsInTimeframe.length(); i++)
+        {
+            JSONObject report = reportsInTimeframe.getJSONObject(i);
+            String id = report.getString("id");
+            if(relevantReportIDs.contains(id))
+            {
+                List<String> entry = new ArrayList<>(Arrays.asList(id, report.getString("title"), dateTimeString));
+                return2DList.add(entry);
+            }
+        }
+
+        return return2DList;
     }
 
     private static List<List<String>> convertAttendenceListTo2dList(List<AttendanceEntry> attendanceList)
@@ -120,6 +264,19 @@ public class ApplicationRoot
         }
 
         return attendanceStringList;
+    }
+
+    private static List<List<String>> convertObjectListTo2dList(List list, Class classType) throws NoSuchMethodException, InvocationTargetException, IllegalAccessException
+    {
+        List<List<String>> obj2DList = new ArrayList<>(list.size());
+        Method toListMethod = classType.getDeclaredMethod("toList");
+        for(int i = 0; i < list.size(); i++)
+        {
+            List<String> attendanceEntryAsList = (List<String>) toListMethod.invoke(list.get(i));
+            obj2DList.add(attendanceEntryAsList);
+        }
+
+        return obj2DList;
     }
 
     //The big one.
@@ -164,7 +321,6 @@ public class ApplicationRoot
 
             //Get all the WorldBuff mappings at the first boss
             sourceIdToWorldBuffsMapping = updateWorldBuffMappingGivenCombatantInfoEvents(sourceIdToWorldBuffsMapping, combatInfo);
-
 
             //Get all the world buffs that fell off between first boss and log start
             sourceIdToWorldBuffsMapping = updateWorldBuffMappingGivenRemovedBuffsEvents(sourceIdToWorldBuffsMapping, removedBuffs);
@@ -288,13 +444,22 @@ public class ApplicationRoot
         return relevantReportIDs;
     }
 
-    private static Long getLatestProcessedDate(SheetsAPI sheetsAPI, String spreadsheetId) throws GeneralSecurityException, IOException
+    private static List<String> getReportsProcessed(SheetsAPI sheetsAPI, String spreadsheetId) throws GeneralSecurityException, IOException
     {
         //Get the attendanceRecords that exist in the sheet.
-        List<List<String>> datesUpdated = sheetsAPI.getRows(spreadsheetId,
-                "datesUpdated", "A:Z");
+        List<List<String>> reportsProcessed = sheetsAPI.getRows(spreadsheetId,
+                "reportsProcessed", "A2:Z");
 
-        return getLatestDateInList(datesUpdated);
+        List<String> justReportIDs = new ArrayList<>();
+        if(reportsProcessed != null)
+        {
+            for(List<String> reportEntry : reportsProcessed)
+            {
+                justReportIDs.add(reportEntry.get(0));
+            }
+        }
+
+        return justReportIDs;
     }
 
     private static Long getLatestDateInList(List<List<String>> attendencesAsStringLists)
@@ -346,11 +511,20 @@ public class ApplicationRoot
         return -1;
     }
 
-    private static JSONArray getLatestReportsWeHaventProcessed(Long lookbackPeriod, Long epochTimeNow,
-                                                               Guild myGuild, WarcraftLogsAPI wlogsApi)
+    private static JSONArray getLatestReportsWeHaventProcessed(Long lookbackPeriod, Long epochTimeNow, Guild myGuild, WarcraftLogsAPI wlogsApi, List<String> reportsProcessed)
     {
         //Search wlogs till the earliest one, between the timeframes of then and now
         JSONArray reportsInTimeframe = wlogsApi.getReportsByGuild(myGuild, epochTimeNow, lookbackPeriod);
+
+        for(int i=0; i < reportsInTimeframe.length(); i++)
+        {
+            JSONObject jsonObj = reportsInTimeframe.getJSONObject(i);
+            if(reportsProcessed.contains(jsonObj.getString("id")))
+            {
+                reportsInTimeframe.remove(i);
+                i--;
+            }
+        }
 
         return reportsInTimeframe;
     }
@@ -396,11 +570,11 @@ public class ApplicationRoot
         return prop;
     }
 
-    private static LocalDateTime getLocalDateTimeWeeksOnDayAgo(int weeksAgo, DayOfWeek day, LocalDateTime inputDateTime)
+    private static Long getLocalDateTimeWeeksOnDayAgo(int weeksAgo, DayOfWeek day, LocalDateTime inputDateTime)
     {
         int daysToSubtract = inputDateTime.getDayOfWeek().getValue() - day.getValue();
         LocalDateTime outputTime = inputDateTime.minusDays(daysToSubtract);
         outputTime = outputTime.minusWeeks(weeksAgo);
-        return outputTime;
+        return outputTime.toEpochSecond(ZoneOffset.UTC) * 1000; //Need in milliseconds.;
     }
 }

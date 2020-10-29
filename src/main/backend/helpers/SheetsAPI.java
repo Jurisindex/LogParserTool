@@ -113,6 +113,7 @@ public class SheetsAPI
 		Sheets.Spreadsheets.Values.Get request =
 				service.spreadsheets().values().get(spreadsheetId, dataRange);
 		request.setMajorDimension("ROWS");
+		request.setRange(dataRange);
 
 		ValueRange response = request.execute();
 

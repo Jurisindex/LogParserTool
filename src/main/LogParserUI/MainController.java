@@ -17,6 +17,8 @@ import javafx.scene.layout.HBox;
 import javafx.util.Duration;
 
 import java.awt.*;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.Properties;
@@ -193,7 +195,7 @@ public class MainController
 
 	private void loadPreviousRunConfigs()
 	{
-		Properties prop = ApplicationRoot.loadProperties("src/main/resources/application.properties");
+		Properties prop = ApplicationRoot.loadProperties("src/main/resources/application-local.properties");
 		setHBoxTextField(guildNameHBox, prop.getProperty("guildName"));
 		setHBoxTextField(serverNameHBox, prop.getProperty("serverName"));
 		setHBoxTextField(regionHBox, prop.getProperty("region"));
@@ -224,15 +226,39 @@ public class MainController
 	private void writeCurrentSuccessfulRunToLocal(LogParseInputData inputData)
 	{
 		//Config IO
-		Properties prop = ApplicationRoot.loadProperties("src/main/resources/application-local.properties");
-		prop.setProperty("guildName", inputData.guildName);
-		prop.setProperty("serverName", inputData.serverName);
-		prop.setProperty("region", inputData.region);
-		prop.setProperty("apiKey", inputData.apiKey);
-		prop.setProperty("weeksLookback", inputData.weeksLookback.toString());
-		prop.setProperty("inclusionText", inputData.inclusionText.toString());
-		prop.setProperty("splitIndicator", inputData.splitIndicators.toString());
-		prop.setProperty("spreadsheetId", inputData.spreadsheetId);
+		String localConfigPath = "src/main/resources/application-local.properties";
+		try
+		{
+			FileWriter fileWriter = new FileWriter(localConfigPath);
+			fileWriter.write("guildName=" + inputData.guildName + '\n');
+			fileWriter.write("serverName=" + inputData.serverName + '\n');
+			fileWriter.write("region=" + inputData.region + '\n');
+			fileWriter.write("apiKey=" + inputData.apiKey + '\n');
+			fileWriter.write("weeksLookback=" + inputData.weeksLookback + '\n');
+			//These are from Lists, who toString as such: [1, 2, 3 3]. I want it to look like: 1,2,3 3
+			String inclusionString = inputData.inclusionText.toString();
+			inclusionString = inclusionString.substring(1, inclusionString.length()-1).replaceAll(", ", ",");
+			fileWriter.write("inclusionText=" + inclusionString + '\n');
+			//These are from Lists, who toString as such: [1, 2, 3 3]. I want it to look like: 1,2,3 3
+			String splitString = inputData.splitIndicators.toString();
+			splitString = splitString.substring(1, splitString.length()-1).replaceAll(", ", ",");
+			fileWriter.write("splitIndicator=" + splitString + '\n');
+			fileWriter.write("spreadsheetId=" + inputData.spreadsheetId + '\n');
+			fileWriter.close();
+//			Properties prop = ApplicationRoot.loadProperties("src/main/resources/application-local.properties");
+//			prop.setProperty("guildName", inputData.guildName);
+//			prop.setProperty("serverName", inputData.serverName);
+//			prop.setProperty("region", inputData.region);
+//			prop.setProperty("apiKey", inputData.apiKey);
+//			prop.setProperty("weeksLookback", inputData.weeksLookback.toString());
+//			prop.setProperty("inclusionText", inputData.inclusionText.toString());
+//			prop.setProperty("splitIndicator", inputData.splitIndicators.toString());
+//			prop.setProperty("spreadsheetId", inputData.spreadsheetId);
+		}
+		catch (IOException e)
+		{
+			e.printStackTrace();
+		}
 	}
 
 	private String findStringInHBoxTextField(HBox guildNameHBox)

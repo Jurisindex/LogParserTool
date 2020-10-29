@@ -13,6 +13,7 @@ public enum WorldBuffs
 	Integer abilityId;
 	private static final Map<Integer, WorldBuffs> BY_ID = new HashMap<>();
 	private static final Map<WorldBuffs, String> buffShorthand = new HashMap<>();
+	private static final Map<String, WorldBuffs> shorthandToBuff = new HashMap<>();
 
 	WorldBuffs(Integer abilityId)
 	{
@@ -38,6 +39,7 @@ public enum WorldBuffs
 			}
 
 			buffShorthand.put(w, shorthand);
+			shorthandToBuff.put(shorthand, w);
 		}
 	}
 
@@ -60,4 +62,5 @@ public enum WorldBuffs
 	{
 		return buffShorthand.get(worldBuff);
 	}
+	public static WorldBuffs getBuffByShorthand(String shorthand) { return shorthandToBuff.get(shorthand); }
 }
