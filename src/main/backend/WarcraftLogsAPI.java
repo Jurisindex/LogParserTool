@@ -32,6 +32,7 @@ public class WarcraftLogsAPI
 		zoneMappings.put(1003,"ZG");
 		zoneMappings.put(1004,"AQ20");
 		zoneMappings.put(1005,"AQ40");
+		zoneMappings.put(1006,"NAXX");
 		zoneMappings.put(1500,"Placeholder");
 	}
 

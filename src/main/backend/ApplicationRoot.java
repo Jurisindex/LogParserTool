@@ -18,10 +18,10 @@ import java.util.*;
 //As a user, I want to be able to see all my guild's reports and name of said reports chronologically
 //Definitely work on a UI wrapper first.
 
-
 public class ApplicationRoot
 {
     private static Logger logger = Logger.getInstance();
+    private static int totalRaids;
 
     public static void applicationDryRun(LogParseInputData data) throws Exception
     {
@@ -36,17 +36,20 @@ public class ApplicationRoot
         SheetsAPI sheetsAPI = new SheetsAPI();
         //Properties prop = loadProperties("src/main/resources/application.properties");
 
-        initializeRoutine(data, sheetsAPI);
+        initializeUpdateJob(data, sheetsAPI);
     }
 
-    private static void initializeRoutine(LogParseInputData data, SheetsAPI sheetsAPI)
+    private static void initializeUpdateJob(LogParseInputData data, SheetsAPI sheetsAPI)
     {
         //Extract all properties values so we can use them more easily.
         try
         {
-            updateAttendanceToLatest(sheetsAPI, data);
+            updateAttendanceEntriesToLatest(sheetsAPI, data);
             List<ReportAggregate> reportAggregateData = createReportAggregates(sheetsAPI, data);
-            updateSheetWithAggregateReport(sheetsAPI, data, reportAggregateData);
+            updateReportAggregatesToLatest(sheetsAPI, data, reportAggregateData);
+            List<ReportAggregate> latestReportAggregates = getListFromSpreadsheet(sheetsAPI, data.spreadsheetId, "reportAggregate", ReportAggregate.class);
+            List<PlayerAggregate> updatedPlayerAggregates = recalculatePlayerAggregate(sheetsAPI, data, latestReportAggregates);
+            updatePlayerAggregatesToLatest(sheetsAPI, data, updatedPlayerAggregates);
         }
         catch (Exception e)
         {
@@ -57,13 +60,49 @@ public class ApplicationRoot
         //TODO: Make Use altToMainMapping and attendanceEntry to create an attendanceAggregate.
     }
 
-    private static void updateSheetWithAggregateReport(SheetsAPI sheetsAPI, LogParseInputData data, List<ReportAggregate> reportAggregateData) throws Exception
+    private static List<PlayerAggregate> recalculatePlayerAggregate(SheetsAPI sheetsAPI, LogParseInputData data, List<ReportAggregate> latestReportAggregates)
+    {
+        Map<LocalDate,List<ReportAggregate>> raidsOnDateMap = new HashMap<>();
+        Map<String, PlayerAggregate> playerNameToAggregateMap = new HashMap<>();
+        LocalDate latestLookupDate = getLocalDateTimeWeeksOnDayAgo(data.weeksLookback, DayOfWeek.MONDAY, LocalDateTime.now()).toLocalDate();
+
+        for(ReportAggregate ra : latestReportAggregates)
+        {
+            LocalDate raDate = getDateFromString(ra.date);
+            if(latestLookupDate.isBefore(raDate))
+            {
+                List<ReportAggregate> reportAggregates = raidsOnDateMap.get(raDate);
+                if(reportAggregates == null)
+                {
+                    reportAggregates = new ArrayList<>();
+                }
+                reportAggregates.add(ra);
+            }
+        }
+
+        //Now we have all the raids sorted by dates.
+
+
+        return (List<PlayerAggregate>) playerNameToAggregateMap.values();
+    }
+
+    private static void updatePlayerAggregatesToLatest(SheetsAPI sheetsAPI, LogParseInputData data, List<PlayerAggregate> updatedPlayerAggregates)
+    {
+        //Get back the previous aggregates.
+        //Take the list of current aggregates we have and make it into a hashMap of Player.name => {PlayerAggergate}.
+        //Iterate through the prev. Aggregates list.
+            //If we find a hit in the hashmap, PUT Update the info.
+            //If we do not find a hit, assume the player hasn't been to raid in the past 8 weeks, and reflect that.
+        //Push 2dData back up to the sheet.
+    }
+
+    private static void updateReportAggregatesToLatest(SheetsAPI sheetsAPI, LogParseInputData data, List<ReportAggregate> reportAggregateData) throws Exception
     {
         List<List<String>> aggregateSheetData = convertObjectListTo2dList(reportAggregateData, ReportAggregate.class);
         sheetsAPI.append2dData(data.spreadsheetId, aggregateSheetData, "reportAggregate");
     }
 
-    private static void updateAttendanceToLatest(SheetsAPI sheetsAPI, LogParseInputData data) throws IOException, GeneralSecurityException
+    private static void updateAttendanceEntriesToLatest(SheetsAPI sheetsAPI, LogParseInputData data) throws IOException, GeneralSecurityException
     {
         Integer weeksLookback = data.weeksLookback;
         String spreadsheetId = data.spreadsheetId;
@@ -77,7 +116,7 @@ public class ApplicationRoot
         //Get all the raids we haven't processed yet.
         LocalDateTime dateTimeNow = LocalDateTime.now();
         Long epochTimeNow = dateTimeNow.toEpochSecond(ZoneOffset.UTC) * 1000;   //Need in milliseconds.
-        Long lookbackEpochTime = getLocalDateTimeWeeksOnDayAgo(weeksLookback, DayOfWeek.MONDAY, dateTimeNow);
+        Long lookbackEpochTime = getEpochMillisecondTimeWeeksOnDayAgo(weeksLookback, DayOfWeek.MONDAY, dateTimeNow);
 
         List<String> reportsProcessed = getReportsProcessed(sheetsAPI, spreadsheetId);
         JSONArray reportsInTimeframe = getLatestReportsWeHaventProcessed(lookbackEpochTime, epochTimeNow, myGuild, wlogsApi, reportsProcessed);
@@ -85,7 +124,7 @@ public class ApplicationRoot
         //Get all raid group relevant reportIds.
         List<String> relevantReportIDs = getAllRaidRelevantReportIds(reportsInTimeframe, inclusionText, splitIndicator);
         //README: Very hacky workaround. See comment near end of ApplicationRoot.getAllRaidRelevantReportIds.
-        Integer totalRaids = Integer.parseInt(relevantReportIDs.remove(0));
+        totalRaids = Integer.parseInt(relevantReportIDs.remove(0));
         Collections.reverse(relevantReportIDs); //So we can have the chronological parsing we want.
 
         //Fill out the list of attendanceEntries. This is the big one.
@@ -570,11 +609,23 @@ public class ApplicationRoot
         return prop;
     }
 
-    private static Long getLocalDateTimeWeeksOnDayAgo(int weeksAgo, DayOfWeek day, LocalDateTime inputDateTime)
+    private static Long getEpochMillisecondTimeWeeksOnDayAgo(int weeksAgo, DayOfWeek day, LocalDateTime inputDateTime)
+    {
+        LocalDateTime outputTime = getLocalDateTimeWeeksOnDayAgo(weeksAgo, day, inputDateTime);
+        return outputTime.toEpochSecond(ZoneOffset.UTC) * 1000; //Need in milliseconds.;
+    }
+
+    private static LocalDateTime getLocalDateTimeWeeksOnDayAgo(int weeksAgo, DayOfWeek day, LocalDateTime inputDateTime)
     {
         int daysToSubtract = inputDateTime.getDayOfWeek().getValue() - day.getValue();
         LocalDateTime outputTime = inputDateTime.minusDays(daysToSubtract);
         outputTime = outputTime.minusWeeks(weeksAgo);
-        return outputTime.toEpochSecond(ZoneOffset.UTC) * 1000; //Need in milliseconds.;
+        return outputTime;
+    }
+
+    private static LocalDate getDateFromString(String input)
+    {
+        LocalDate date = LocalDate.parse(input);
+        return date;
     }
 }

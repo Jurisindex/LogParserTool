@@ -1,3 +1,4 @@
+import helpers.DatabaseEntity;
 import helpers.Logger;
 
 import java.time.DayOfWeek;
@@ -8,7 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-public class AttendanceEntry
+public class AttendanceEntry extends DatabaseEntity
 {
 	private static Logger logger = Logger.getInstance();
 
@@ -36,23 +37,15 @@ public class AttendanceEntry
 
 	public AttendanceEntry(List<String> databaseRow)
 	{
-		this(databaseRow.get(0),databaseRow.get(1),databaseRow.get(2),databaseRow.get(3),
-			 databaseRow.get(4),databaseRow.get(5),databaseRow.get(6), databaseRow.get(7),
-		     databaseRow.get(8));
-	}
-
-	//This acts as an AttendanceEntryDAO. This is hilarious, but... :)
-	public AttendanceEntry(String playerName, String playerClass, String idThisRaid, String reportId, String date,
-						   String dayOfWeek, String zone, String worldBuffs, String wbuffsCheck)
-	{
-		Player player = new Player(playerName, WoWClass.getClass(playerClass));
+		Player player = new Player(databaseRow.get(0), WoWClass.getClass(databaseRow.get(1)));
 		this.player = player;
-		this.idThisRaid = Integer.parseInt(idThisRaid);
-		this.reportId = reportId;
-		this.date = date;
-		this.dayOfWeek = DayOfWeek.valueOf(dayOfWeek);
-		this.zone = zone;
+		this.idThisRaid = Integer.parseInt(databaseRow.get(2));
+		this.reportId = databaseRow.get(3);
+		this.date = databaseRow.get(4);
+		this.dayOfWeek = DayOfWeek.valueOf(databaseRow.get(5));
+		this.zone = databaseRow.get(6);
 		//Get rid of brackets, check for error, split.
+		String worldBuffs = databaseRow.get(7);
 		worldBuffs = worldBuffs.substring(1, worldBuffs.length()-1);
 		if(worldBuffs.contains("ERROR"))
 		{
@@ -68,7 +61,7 @@ public class AttendanceEntry
 				this.worldBuffs.add(thisBuff);
 			}
 		}
-		this.acceptableWbuffs = Boolean.valueOf(wbuffsCheck);
+		this.acceptableWbuffs = Boolean.valueOf(databaseRow.get(8));
 	}
 
 	private boolean calculateWbuffsAcceptable()
@@ -100,6 +93,7 @@ public class AttendanceEntry
 		return false;
 	}
 
+	@Override
 	public List<String> toList()
 	{
 		List<String> listRepresentation = new ArrayList<>(9);
